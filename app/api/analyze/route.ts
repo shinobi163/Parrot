@@ -17,7 +17,7 @@ Competitor: ${name}
 Website: ${url}
 Category: ${category}
 
-Search for:
+Run a maximum of 4 web searches total. Use these searches:
 1. "${name} new feature launch 2025"
 2. "${name} site:reddit.com OR site:news.ycombinator.com"
 3. "${name} reviews complaints 2025"
@@ -31,7 +31,7 @@ Return exactly this JSON structure:
     { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Reddit|HN|ProductHunt" }
   ],
   "sentiment": [
-    { "label": "string (3 words max)", "score": number_0_to_100, "direction": "pos|neg|neu" }
+    { "label": "string (3 words max)", "score": number_0_to_100, "direction": "pos|neg|neu", "summary": "string (20 words max, e.g. Users love the speed and simplicity or Frequent complaints about pricing)" }
   ]
 }
 
@@ -39,6 +39,8 @@ Rules:
 - activity: 2-3 items only
 - community: 2-3 items only
 - sentiment: 3-4 items only
+- score represents intensity of the sentiment (high = strongly felt, low = mildly mentioned)
+- direction: pos = users praise this, neg = users complain about this, neu = mixed or neutral
 - Do not include any citation tags or markup in string values
 - If you cannot find real data for a field, omit that item rather than fabricate
 - Return valid JSON only, nothing else`
@@ -73,7 +75,6 @@ Rules:
       return NextResponse.json({ error: 'No text response from model.' }, { status: 500 })
     }
 
-    // Extract JSON — strip markdown fences if present
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
       console.error('No JSON found in response:', raw)
@@ -93,8 +94,10 @@ Rules:
       }))
     }
     if (parsed.sentiment) {
-      parsed.sentiment = parsed.sentiment.map((i: { label: string; score: number; direction: string }) => ({
-        ...i, label: stripCitations(i.label)
+      parsed.sentiment = parsed.sentiment.map((i: { label: string; score: number; direction: string; summary: string }) => ({
+        ...i,
+        label: stripCitations(i.label),
+        summary: i.summary ? stripCitations(i.summary) : ''
       }))
     }
 
