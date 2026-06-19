@@ -606,3 +606,25 @@
     border-color: rgba(99, 153, 34, 0.35) !important;
   }
 }
+
+/* Word cloud */
+.wordCloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+  padding-top: 4px;
+}
+
+.keyword {
+  display: inline-block;
+  font-weight: 500;
+  line-height: 1.3;
+  cursor: default;
+  transition: opacity 0.15s;
+  letter-spacing: -0.2px;
+}
+
+.keyword:hover {
+  opacity: 1 !important;
+}
