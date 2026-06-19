@@ -25,13 +25,13 @@ Run a maximum of 4 web searches total. Use these searches:
 Return exactly this JSON structure:
 {
   "activity": [
-    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Blog|Changelog|Press" }
+    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Blog|Changelog|Press", "url": "direct URL to the source article or page, or empty string if not available" }
   ],
   "community": [
-    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Reddit|HN|ProductHunt" }
+    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Reddit|HN|ProductHunt", "url": "direct URL to the Reddit post, HN thread, or Product Hunt page, or empty string if not available" }
   ],
   "sentiment": [
-    { "label": "string (3 words max)", "score": number_0_to_100, "direction": "pos|neg|neu", "summary": "string (20 words max, e.g. Users love the speed and simplicity or Frequent complaints about pricing)" }
+    { "label": "string (3 words max)", "score": number_0_to_100, "direction": "pos|neg|neu", "summary": "string (20 words max)" }
   ]
 }
 
@@ -39,8 +39,10 @@ Rules:
 - activity: 2-3 items only
 - community: 2-3 items only
 - sentiment: 3-4 items only
-- score represents intensity of the sentiment (high = strongly felt, low = mildly mentioned)
+- score means SATISFACTION level: high score (70-100) = users are happy with this, low score (0-30) = users are unhappy, mid (40-60) = mixed
 - direction: pos = users praise this, neg = users complain about this, neu = mixed or neutral
+- summary: one plain sentence describing what users say, e.g. "Users love the speed and simplicity" or "Frequent complaints about pricing and hidden fees"
+- url: include the actual URL if found during search, otherwise use empty string ""
 - Do not include any citation tags or markup in string values
 - If you cannot find real data for a field, omit that item rather than fabricate
 - Return valid JSON only, nothing else`
@@ -84,13 +86,13 @@ Rules:
     const parsed = JSON.parse(jsonMatch[0])
 
     if (parsed.activity) {
-      parsed.activity = parsed.activity.map((i: { title: string; body: string; source: string }) => ({
-        ...i, title: stripCitations(i.title), body: stripCitations(i.body)
+      parsed.activity = parsed.activity.map((i: { title: string; body: string; source: string; url: string }) => ({
+        ...i, title: stripCitations(i.title), body: stripCitations(i.body), url: i.url || ''
       }))
     }
     if (parsed.community) {
-      parsed.community = parsed.community.map((i: { title: string; body: string; source: string }) => ({
-        ...i, title: stripCitations(i.title), body: stripCitations(i.body)
+      parsed.community = parsed.community.map((i: { title: string; body: string; source: string; url: string }) => ({
+        ...i, title: stripCitations(i.title), body: stripCitations(i.body), url: i.url || ''
       }))
     }
     if (parsed.sentiment) {
