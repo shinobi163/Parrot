@@ -25,13 +25,16 @@ Run a maximum of 4 web searches total. Use these searches:
 Return exactly this JSON structure:
 {
   "activity": [
-    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Blog|Changelog|Press", "url": "direct URL to the source article or page, or empty string if not available" }
+    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Blog|Changelog|Press", "url": "direct URL or empty string" }
   ],
   "community": [
-    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Reddit|HN|ProductHunt", "url": "direct URL to the Reddit post, HN thread, or Product Hunt page, or empty string if not available" }
+    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Reddit|HN|ProductHunt", "url": "direct URL or empty string" }
   ],
   "sentiment": [
     { "label": "string (3 words max)", "score": number_0_to_100, "direction": "pos|neg|neu", "summary": "string (20 words max)" }
+  ],
+  "keywords": [
+    { "word": "single word or short phrase (2 words max)", "weight": number_1_to_10, "direction": "pos|neg|neu" }
   ]
 }
 
@@ -39,10 +42,11 @@ Rules:
 - activity: 2-3 items only
 - community: 2-3 items only
 - sentiment: 3-4 items only
-- score means SATISFACTION level: high score (70-100) = users are happy with this, low score (0-30) = users are unhappy, mid (40-60) = mixed
+- score means SATISFACTION level: high (70-100) = users happy, low (0-30) = users unhappy, mid (40-60) = mixed
 - direction: pos = users praise this, neg = users complain about this, neu = mixed or neutral
-- summary: one plain sentence describing what users say, e.g. "Users love the speed and simplicity" or "Frequent complaints about pricing and hidden fees"
-- url: include the actual URL if found during search, otherwise use empty string ""
+- summary: one plain sentence e.g. "Users love the speed and simplicity" or "Frequent complaints about pricing"
+- keywords: 12-18 words or short phrases extracted from community discussions and review sentiment only. weight = how frequently or strongly mentioned (1=rarely, 10=very frequently). direction = sentiment toward that keyword
+- url: actual URL if found, otherwise empty string ""
 - Do not include any citation tags or markup in string values
 - If you cannot find real data for a field, omit that item rather than fabricate
 - Return valid JSON only, nothing else`
@@ -100,6 +104,11 @@ Rules:
         ...i,
         label: stripCitations(i.label),
         summary: i.summary ? stripCitations(i.summary) : ''
+      }))
+    }
+    if (parsed.keywords) {
+      parsed.keywords = parsed.keywords.map((i: { word: string; weight: number; direction: string }) => ({
+        ...i, word: stripCitations(i.word)
       }))
     }
 
