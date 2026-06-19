@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// Strip citation tags the web search tool injects into body text
+function stripCitations(text: string): string {
+  return text.replace(/<cite[^>]*>|<\/cite>/g, '').trim()
+}
+
 export async function POST(req: NextRequest) {
   const { name, url, category } = await req.json()
 
@@ -80,11 +85,6 @@ Rules:
     }
 
     const parsed = JSON.parse(jsonMatch[0])
-
-    // Strip citation tags the web search tool injects into body text
-    function stripCitations(text: string): string {
-      return text.replace(/<cite[^>]*>|<\/cite>/g, '').trim()
-    }
 
     if (parsed.activity) {
       parsed.activity = parsed.activity.map((i: { title: string; body: string; source: string }) => ({
