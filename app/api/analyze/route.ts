@@ -5,9 +5,9 @@ function stripCitations(text: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const { name, url, category } = await req.json()
+  const { name, url, sector, category } = await req.json()
 
-  if (!name || !url || !category) {
+  if (!name || !url || !sector || !category) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 })
   }
 
@@ -15,7 +15,10 @@ export async function POST(req: NextRequest) {
 
 Competitor: ${name}
 Website: ${url}
+Sector: ${sector}
 Category: ${category}
+
+Frame your entire analysis through the lens of a ${category} company within the ${sector} sector. This determines which competitors, communities, and review sources are relevant.
 
 Run a maximum of 4 web searches total. Use these searches:
 1. "${name} new feature launch 2025"
@@ -45,7 +48,7 @@ Rules:
 - score means SATISFACTION level: high (70-100) = users happy, low (0-30) = users unhappy, mid (40-60) = mixed
 - direction: pos = users praise this, neg = users complain about this, neu = mixed or neutral
 - summary: one plain sentence e.g. "Users love the speed and simplicity" or "Frequent complaints about pricing"
-- keywords: 12-18 words or short phrases extracted from community discussions and review sentiment only. weight = how frequently or strongly mentioned (1=rarely, 10=very frequently). direction = sentiment toward that keyword
+- keywords: 12-18 words extracted from community discussions and review sentiment only. weight = frequency/strength (1=rarely, 10=very frequently). direction = sentiment toward that keyword
 - url: actual URL if found, otherwise empty string ""
 - Do not include any citation tags or markup in string values
 - If you cannot find real data for a field, omit that item rather than fabricate
