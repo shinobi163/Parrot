@@ -13,29 +13,28 @@ Competitor: ${name}
 Website: ${url}
 Category: ${category}
 
-Use web search to find:
-1. Recent product launches, features, or announcements (last 90 days)
-2. Community discussions on Reddit, Hacker News, and Product Hunt
-3. Patterns in App Store / review platform sentiment
+Run a maximum of 4 web searches total. Use these searches:
+1. "${name} new feature launch 2025"
+2. "${name} site:reddit.com OR site:news.ycombinator.com"
+3. "${name} reviews complaints 2025"
 
 Return exactly this JSON structure:
 {
   "activity": [
-    { "title": "string (10 words max)", "body": "string (2-3 sentences)", "source": "Blog|Changelog|Press" }
+    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Blog|Changelog|Press" }
   ],
   "community": [
-    { "title": "string (10 words max)", "body": "string (2-3 sentences)", "source": "Reddit|HN|ProductHunt" }
+    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Reddit|HN|ProductHunt" }
   ],
   "sentiment": [
-    { "label": "string (theme name)", "score": number_0_to_100, "direction": "pos|neg|neu" }
+    { "label": "string (3 words max)", "score": number_0_to_100, "direction": "pos|neg|neu" }
   ]
 }
 
 Rules:
-- activity: 2-4 items, only verified recent events, not speculation
-- community: 2-4 items representing distinct discussion themes
-- sentiment: 3-5 items representing recurring review themes, score = intensity 0-100
-- Keep each body field under 40 words
+- activity: 2-3 items only
+- community: 2-3 items only
+- sentiment: 3-4 items only
 - If you cannot find real data for a field, omit that item rather than fabricate
 - Return valid JSON only, nothing else`
 
@@ -48,8 +47,8 @@ Rules:
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }]
       })
