@@ -35,6 +35,7 @@ Rules:
 - activity: 2-4 items, only verified recent events, not speculation
 - community: 2-4 items representing distinct discussion themes
 - sentiment: 3-5 items representing recurring review themes, score = intensity 0-100
+- Keep each body field under 40 words
 - If you cannot find real data for a field, omit that item rather than fabricate
 - Return valid JSON only, nothing else`
 
@@ -48,7 +49,7 @@ Rules:
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
+        max_tokens: 4000,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }]
       })
@@ -61,15 +62,26 @@ Rules:
       return NextResponse.json({ error: data.error?.message || 'Anthropic API error' }, { status: 500 })
     }
 
-    const textBlock = data.content?.find((b: { type: string }) => b.type === 'text')
+    // Find the last text block — the final JSON output after all tool calls
+    const textBlocks = data.content?.filter((b: { type: string }) => b.type === 'text')
+    const textBlock = textBlocks?.[textBlocks.length - 1]
+
     if (!textBlock?.text) {
+      console.error('No text block found. Content:', JSON.stringify(data.content))
       return NextResponse.json({ error: 'No text response from model.' }, { status: 500 })
     }
 
-    const clean = textBlock.text.replace(/```json|```/g, '').trim()
-    const parsed = JSON.parse(clean)
+    // Extract JSON — handle markdown fences and leading/trailing text
+    const raw = textBlock.text
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      console.error('No JSON found in response:', raw)
+      return NextResponse.json({ error: 'Could not parse response.' }, { status: 500 })
+    }
 
+    const parsed = JSON.parse(jsonMatch[0])
     return NextResponse.json(parsed)
+
   } catch (err) {
     console.error('Server error:', err)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
