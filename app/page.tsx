@@ -13,10 +13,12 @@ type Direction = 'pos' | 'neg' | 'neu'
 interface ActivityItem { title: string; body: string; source: string; url: string }
 interface CommunityItem { title: string; body: string; source: string; url: string }
 interface SentimentItem { label: string; score: number; direction: Direction; summary: string }
+interface KeywordItem { word: string; weight: number; direction: Direction }
 interface Brief {
   activity: ActivityItem[]
   community: CommunityItem[]
   sentiment: SentimentItem[]
+  keywords: KeywordItem[]
 }
 
 interface HistoryEntry {
@@ -75,6 +77,23 @@ function scoreToDotClass(score: number, s: Record<string, string>): string {
   return s.dotNeu
 }
 
+function keywordColor(direction: Direction): string {
+  if (direction === 'pos') return '#639922'
+  if (direction === 'neg') return '#e24b4a'
+  return '#888780'
+}
+
+function keywordOpacity(weight: number): number {
+  // weight 1-10 maps to opacity 0.4-1.0
+  return 0.4 + (weight / 10) * 0.6
+}
+
+function keywordSize(weight: number): string {
+  // weight 1-10 maps to font-size 11px-22px
+  const size = Math.round(11 + (weight / 10) * 11)
+  return `${size}px`
+}
+
 function formatBriefAsText(name: string, url: string, category: string, date: string, brief: Brief): string {
   const lines: string[] = []
   lines.push(`PARROT — Competitive Brief`)
@@ -83,7 +102,7 @@ function formatBriefAsText(name: string, url: string, category: string, date: st
   lines.push('RECENT ACTIVITY')
   lines.push('---------------')
   for (const item of brief.activity || []) {
-    lines.push(`${item.title}`)
+    lines.push(item.title)
     lines.push(item.body)
     lines.push(`Source: ${item.source}${item.url ? ' — ' + item.url : ''}`)
     lines.push('')
@@ -91,7 +110,7 @@ function formatBriefAsText(name: string, url: string, category: string, date: st
   lines.push('COMMUNITY SIGNAL')
   lines.push('----------------')
   for (const item of brief.community || []) {
-    lines.push(`${item.title}`)
+    lines.push(item.title)
     lines.push(item.body)
     lines.push(`Source: ${item.source}${item.url ? ' — ' + item.url : ''}`)
     lines.push('')
@@ -266,7 +285,6 @@ export default function Home() {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Fallback for browsers that block clipboard
       const el = document.createElement('textarea')
       el.value = text
       document.body.appendChild(el)
@@ -314,7 +332,7 @@ export default function Home() {
               </svg>
             </div>
             <span className={styles.logoName}>Parrot</span>
-            <span className={styles.logoTag}>competitive intelligence</span>
+            <span className={styles.logoTag}>market signal</span>
           </div>
           {history.length > 0 && (
             <button className={styles.historyBtn} onClick={() => setSidebarOpen(true)}>
@@ -460,7 +478,7 @@ export default function Home() {
               <div className={styles.panelRight}>
                 <div className={styles.sectionCard}>
                   <div className={styles.sectionHead}>
-                    <span className={styles.sectionLabel}>Review sentiment</span>
+                    <span className={styles.sectionLabel}>Market sentiment</span>
                     <span className={styles.sectionSubLabel}>Score = satisfaction (100 = users love it)</span>
                   </div>
                   {(brief.sentiment || []).length === 0
@@ -484,6 +502,31 @@ export default function Home() {
                       </div>
                     ))}
                 </div>
+
+                {/* Word cloud */}
+                {(brief.keywords || []).length > 0 && (
+                  <div className={styles.sectionCard}>
+                    <div className={styles.sectionHead}>
+                      <span className={styles.sectionLabel}>Signal keywords</span>
+                      <span className={styles.sectionSubLabel}>size = frequency · colour = sentiment</span>
+                    </div>
+                    <div className={styles.wordCloud}>
+                      {brief.keywords.map((kw, i) => (
+                        <span
+                          key={i}
+                          className={styles.keyword}
+                          style={{
+                            fontSize: keywordSize(kw.weight),
+                            color: keywordColor(kw.direction),
+                            opacity: keywordOpacity(kw.weight),
+                          }}
+                        >
+                          {kw.word}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
