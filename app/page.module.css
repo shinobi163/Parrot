@@ -594,3 +594,15 @@
   color: var(--text-tertiary);
   line-height: 1.6;
 }
+
+.copiedBtn {
+  color: #639922 !important;
+  border-color: rgba(99, 153, 34, 0.4) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .copiedBtn {
+    color: #8bc34a !important;
+    border-color: rgba(99, 153, 34, 0.35) !important;
+  }
+}
