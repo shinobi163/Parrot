@@ -10,6 +10,11 @@
   max-width: 520px;
 }
 
+.containerWide {
+  width: 100%;
+  max-width: 960px;
+}
+
 /* Logo */
 .logo {
   display: flex;
@@ -191,7 +196,7 @@
   50% { opacity: 0.3; }
 }
 
-/* Results */
+/* Results header */
 .resultsHeader {
   display: flex;
   align-items: flex-start;
@@ -219,6 +224,7 @@
   border-radius: var(--radius-md);
   padding: 5px 10px;
   cursor: pointer;
+  white-space: nowrap;
   transition: border-color 0.15s, color 0.15s;
 }
 
@@ -227,13 +233,38 @@
   color: var(--text-primary);
 }
 
+/* Two-panel grid */
+.panelGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 640px) {
+  .panelGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panelLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panelRight {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* Section cards */
 .sectionCard {
   background: var(--bg-card);
   border: 0.5px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 1.25rem;
-  margin-bottom: 12px;
 }
 
 .sectionHead {
@@ -241,11 +272,11 @@
 }
 
 .sectionLabel {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
 }
 
 .item {
@@ -281,45 +312,90 @@
   margin-top: 5px;
 }
 
-/* Sentiment */
-.sentimentRow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 7px 0;
+/* Sentiment items */
+.sentimentItem {
+  padding: 10px 0;
   border-bottom: 0.5px solid var(--border);
 }
 
-.sentimentRow:last-child { border-bottom: none; }
+.sentimentItem:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.sentimentTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.sentimentMeta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sentimentDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dotPos { background: var(--green); }
+.dotNeg { background: var(--red); }
+.dotNeu { background: var(--text-tertiary); }
 
 .sentimentLabel {
   font-size: 13px;
-  color: var(--text-secondary);
-  flex: 1;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.sentimentPct {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 
 .sentimentBarWrap {
-  width: 110px;
+  width: 100%;
   height: 4px;
   background: var(--bg-secondary);
   border-radius: 2px;
   overflow: hidden;
+  margin-bottom: 6px;
 }
 
 .sentimentBar {
   height: 100%;
   border-radius: 2px;
-  transition: width 0.4s ease;
+  transition: width 0.5s ease;
 }
 
 .barPos { background: var(--green); }
 .barNeg { background: var(--red); }
 .barNeu { background: var(--text-tertiary); }
 
-.sentimentPct {
+.sentimentSummary {
   font-size: 12px;
   color: var(--text-tertiary);
-  width: 28px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+/* Footer */
+.footer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 0.5px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.footerText {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
 }
