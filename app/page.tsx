@@ -5,6 +5,8 @@ import styles from './page.module.css'
 
 const DAILY_LIMIT = 3
 const STORAGE_KEY = 'parrot_usage'
+const HISTORY_KEY = 'parrot_history'
+const MAX_HISTORY = 5
 
 type Direction = 'pos' | 'neg' | 'neu'
 
@@ -15,6 +17,14 @@ interface Brief {
   activity: ActivityItem[]
   community: CommunityItem[]
   sentiment: SentimentItem[]
+}
+
+interface HistoryEntry {
+  name: string
+  url: string
+  category: string
+  date: string
+  brief: Brief
 }
 
 function getToday() { return new Date().toISOString().slice(0, 10) }
@@ -33,17 +43,38 @@ function saveUsage(count: number) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ date: getToday(), count }))
 }
 
-// Score = satisfaction. Low = unhappy, high = happy.
-function scoreToBarClass(score: number): string {
-  if (score >= 65) return styles.barPos
-  if (score <= 35) return styles.barNeg
-  return styles.barNeu
+function getHistory(): HistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
 }
 
-function scoreToDotClass(score: number): string {
-  if (score >= 65) return styles.dotPos
-  if (score <= 35) return styles.dotNeg
-  return styles.dotNeu
+function saveToHistory(entry: HistoryEntry) {
+  const history = getHistory()
+  // Remove existing entry for same company if present
+  const filtered = history.filter(h => h.name.toLowerCase() !== entry.name.toLowerCase())
+  // Prepend new entry, keep max 5
+  const updated = [entry, ...filtered].slice(0, MAX_HISTORY)
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(updated))
+  return updated
+}
+
+function getCached(name: string): HistoryEntry | null {
+  const history = getHistory()
+  return history.find(h => h.name.toLowerCase() === name.toLowerCase()) || null
+}
+
+function scoreToBarClass(score: number, s: Record<string, string>): string {
+  if (score >= 65) return s.barPos
+  if (score <= 35) return s.barNeg
+  return s.barNeu
+}
+
+function scoreToDotClass(score: number, s: Record<string, string>): string {
+  if (score >= 65) return s.dotPos
+  if (score <= 35) return s.dotNeg
+  return s.dotNeu
 }
 
 const STEPS = [
@@ -59,6 +90,17 @@ const CATEGORIES = [
   'Design tools', 'Analytics', 'CRM / Sales', 'Marketing', 'Other',
 ]
 
+function SourceTag({ source, url, s }: { source: string; url: string; s: Record<string, string> }) {
+  if (url) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className={`${s.sourceTag} ${s.sourceTagLink}`}>
+        {source} ↗
+      </a>
+    )
+  }
+  return <span className={s.sourceTag}>{source}</span>
+}
+
 export default function Home() {
   const [screen, setScreen] = useState<'input' | 'loading' | 'results'>('input')
   const [name, setName] = useState('')
@@ -72,9 +114,14 @@ export default function Home() {
   const [analyzedName, setAnalyzedName] = useState('')
   const [analyzedUrl, setAnalyzedUrl] = useState('')
   const [analyzedAt, setAnalyzedAt] = useState('')
+  const [analyzedCategory, setAnalyzedCategory] = useState('')
+  const [fromCache, setFromCache] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [history, setHistory] = useState<HistoryEntry[]>([])
 
   useEffect(() => {
     setRemaining(Math.max(0, DAILY_LIMIT - getUsage().count))
+    setHistory(getHistory())
   }, [])
 
   async function analyze() {
@@ -82,11 +129,27 @@ export default function Home() {
     if (!name.trim()) { setError('Enter a competitor name to continue.'); return }
     if (!url.trim()) { setError('Enter the competitor website.'); return }
     if (!category) { setError('Select a category.'); return }
+
+    // Check cache first
+    const cached = getCached(name.trim())
+    if (cached) {
+      setBrief(cached.brief)
+      setAnalyzedName(cached.name)
+      setAnalyzedUrl(cached.url)
+      setAnalyzedAt(cached.date)
+      setAnalyzedCategory(cached.category)
+      setFromCache(true)
+      setScreen('results')
+      return
+    }
+
     const usage = getUsage()
     if (usage.count >= DAILY_LIMIT) return
 
     setAnalyzedName(name.trim())
     setAnalyzedUrl(url.trim())
+    setAnalyzedCategory(category)
+    setFromCache(false)
     setScreen('loading')
     setActiveStep(0)
     setDoneSteps([])
@@ -119,8 +182,20 @@ export default function Home() {
       const newCount = usage.count + 1
       saveUsage(newCount)
       setRemaining(Math.max(0, DAILY_LIMIT - newCount))
+
+      const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      const entry: HistoryEntry = {
+        name: name.trim(),
+        url: url.trim(),
+        category,
+        date: dateStr,
+        brief: data
+      }
+      const updated = saveToHistory(entry)
+      setHistory(updated)
+
       setBrief(data)
-      setAnalyzedAt(new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))
+      setAnalyzedAt(dateStr)
       setScreen('results')
     } catch (e: unknown) {
       clearInterval(interval)
@@ -129,44 +204,86 @@ export default function Home() {
     }
   }
 
+  function loadFromHistory(entry: HistoryEntry) {
+    setBrief(entry.brief)
+    setAnalyzedName(entry.name)
+    setAnalyzedUrl(entry.url)
+    setAnalyzedAt(entry.date)
+    setAnalyzedCategory(entry.category)
+    setFromCache(true)
+    setSidebarOpen(false)
+    setScreen('results')
+  }
+
   function reset() {
     setScreen('input')
     setError('')
     setActiveStep(-1)
     setDoneSteps([])
+    setSidebarOpen(false)
   }
 
-  function SourceTag({ source, url }: { source: string; url: string }) {
-    if (url) {
-      return (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`${styles.sourceTag} ${styles.sourceTagLink}`}
-        >
-          {source} ↗
-        </a>
-      )
-    }
-    return <span className={styles.sourceTag}>{source}</span>
+  function refreshAnalysis() {
+    // Remove from cache and re-run
+    const history = getHistory()
+    const filtered = history.filter(h => h.name.toLowerCase() !== analyzedName.toLowerCase())
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered))
+    setHistory(filtered)
+    setName(analyzedName)
+    setUrl(analyzedUrl)
+    setCategory(analyzedCategory)
+    setScreen('input')
+    setFromCache(false)
   }
 
   return (
     <main className={styles.main}>
+      {/* Sidebar overlay */}
+      {sidebarOpen && (
+        <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* History sidebar */}
+      <div className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ''}`}>
+        <div className={styles.sidebarHeader}>
+          <span className={styles.sidebarTitle}>Recent analyses</span>
+          <button className={styles.sidebarClose} onClick={() => setSidebarOpen(false)}>✕</button>
+        </div>
+        {history.length === 0 ? (
+          <p className={styles.sidebarEmpty}>No analyses yet. Run your first one.</p>
+        ) : (
+          <div className={styles.sidebarList}>
+            {history.map((entry, i) => (
+              <button key={i} className={styles.sidebarItem} onClick={() => loadFromHistory(entry)}>
+                <span className={styles.sidebarItemName}>{entry.name}</span>
+                <span className={styles.sidebarItemMeta}>{entry.category} · {entry.date}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className={styles.sidebarFooter}>Showing up to {MAX_HISTORY} most recent</p>
+      </div>
+
       <div className={screen === 'results' ? styles.containerWide : styles.container}>
 
         {/* Logo */}
-        <div className={styles.logo}>
-          <div className={styles.logoMark}>
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <circle cx="9" cy="9" r="3" fill="currentColor" />
-              <path d="M9 2C5.13 2 2 5.13 2 9s3.13 7 7 7 7-3.13 7-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              <circle cx="14" cy="4" r="1.5" fill="#e24b4a" />
-            </svg>
+        <div className={styles.logoRow}>
+          <div className={styles.logo}>
+            <div className={styles.logoMark}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <circle cx="9" cy="9" r="3" fill="currentColor" />
+                <path d="M9 2C5.13 2 2 5.13 2 9s3.13 7 7 7 7-3.13 7-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <circle cx="14" cy="4" r="1.5" fill="#e24b4a" />
+              </svg>
+            </div>
+            <span className={styles.logoName}>Parrot</span>
+            <span className={styles.logoTag}>competitive intelligence</span>
           </div>
-          <span className={styles.logoName}>Parrot</span>
-          <span className={styles.logoTag}>competitive intelligence</span>
+          {history.length > 0 && (
+            <button className={styles.historyBtn} onClick={() => setSidebarOpen(true)}>
+              History ({history.length})
+            </button>
+          )}
         </div>
 
         {/* INPUT */}
@@ -253,13 +370,24 @@ export default function Home() {
             <div className={styles.resultsHeader}>
               <div>
                 <p className={styles.resultsTitle}>{analyzedName}</p>
-                <p className={styles.resultsMeta}>{analyzedUrl} · {analyzedAt} · {category}</p>
+                <div className={styles.resultsMetaRow}>
+                  <p className={styles.resultsMeta}>{analyzedUrl} · {analyzedAt} · {analyzedCategory}</p>
+                  {fromCache && (
+                    <span className={styles.cacheTag}>
+                      Cached · <button className={styles.refreshLink} onClick={refreshAnalysis}>Refresh</button>
+                    </span>
+                  )}
+                </div>
               </div>
-              <button className={styles.resetBtn} onClick={reset}>← New analysis</button>
+              <div className={styles.resultsActions}>
+                {history.length > 0 && (
+                  <button className={styles.resetBtn} onClick={() => setSidebarOpen(true)}>History</button>
+                )}
+                <button className={styles.resetBtn} onClick={reset}>← New</button>
+              </div>
             </div>
 
             <div className={styles.panelGrid}>
-              {/* Left: Activity + Community */}
               <div className={styles.panelLeft}>
                 <div className={styles.sectionCard}>
                   <div className={styles.sectionHead}>
@@ -271,7 +399,7 @@ export default function Home() {
                       <div key={i} className={styles.item}>
                         <p className={styles.itemTitle}>{item.title}</p>
                         <p className={styles.itemBody}>{item.body}</p>
-                        <SourceTag source={item.source} url={item.url} />
+                        <SourceTag source={item.source} url={item.url} s={styles} />
                       </div>
                     ))}
                 </div>
@@ -286,13 +414,12 @@ export default function Home() {
                       <div key={i} className={styles.item}>
                         <p className={styles.itemTitle}>{item.title}</p>
                         <p className={styles.itemBody}>{item.body}</p>
-                        <SourceTag source={item.source} url={item.url} />
+                        <SourceTag source={item.source} url={item.url} s={styles} />
                       </div>
                     ))}
                 </div>
               </div>
 
-              {/* Right: Sentiment */}
               <div className={styles.panelRight}>
                 <div className={styles.sectionCard}>
                   <div className={styles.sectionHead}>
@@ -305,27 +432,24 @@ export default function Home() {
                       <div key={i} className={styles.sentimentItem}>
                         <div className={styles.sentimentTop}>
                           <div className={styles.sentimentMeta}>
-                            <span className={`${styles.sentimentDot} ${scoreToDotClass(item.score)}`} />
+                            <span className={`${styles.sentimentDot} ${scoreToDotClass(item.score, styles)}`} />
                             <span className={styles.sentimentLabel}>{item.label}</span>
                           </div>
                           <span className={styles.sentimentPct}>{Math.round(item.score)}</span>
                         </div>
                         <div className={styles.sentimentBarWrap}>
                           <div
-                            className={`${styles.sentimentBar} ${scoreToBarClass(item.score)}`}
+                            className={`${styles.sentimentBar} ${scoreToBarClass(item.score, styles)}`}
                             style={{ width: `${Math.round(item.score)}%` }}
                           />
                         </div>
-                        {item.summary && (
-                          <p className={styles.sentimentSummary}>{item.summary}</p>
-                        )}
+                        {item.summary && <p className={styles.sentimentSummary}>{item.summary}</p>}
                       </div>
                     ))}
                 </div>
               </div>
             </div>
 
-            {/* Footer */}
             <div className={styles.footer}>
               <p className={styles.footerText}>
                 Sentiment and signals reflect publicly available user opinions and community discussions — not the views of Parrot or its creators.
@@ -336,7 +460,6 @@ export default function Home() {
             </div>
           </div>
         )}
-
       </div>
     </main>
   )
