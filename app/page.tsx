@@ -8,8 +8,8 @@ const STORAGE_KEY = 'parrot_usage'
 
 type Direction = 'pos' | 'neg' | 'neu'
 
-interface ActivityItem { title: string; body: string; source: string }
-interface CommunityItem { title: string; body: string; source: string }
+interface ActivityItem { title: string; body: string; source: string; url: string }
+interface CommunityItem { title: string; body: string; source: string; url: string }
 interface SentimentItem { label: string; score: number; direction: Direction; summary: string }
 interface Brief {
   activity: ActivityItem[]
@@ -31,6 +31,19 @@ function getUsage(): { date: string; count: number } {
 
 function saveUsage(count: number) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ date: getToday(), count }))
+}
+
+// Score = satisfaction. Low = unhappy, high = happy.
+function scoreToBarClass(score: number): string {
+  if (score >= 65) return styles.barPos
+  if (score <= 35) return styles.barNeg
+  return styles.barNeu
+}
+
+function scoreToDotClass(score: number): string {
+  if (score >= 65) return styles.dotPos
+  if (score <= 35) return styles.dotNeg
+  return styles.dotNeu
 }
 
 const STEPS = [
@@ -123,16 +136,20 @@ export default function Home() {
     setDoneSteps([])
   }
 
-  const sentimentColor: Record<Direction, string> = {
-    pos: styles.barPos,
-    neg: styles.barNeg,
-    neu: styles.barNeu,
-  }
-
-  const sentimentDot: Record<Direction, string> = {
-    pos: styles.dotPos,
-    neg: styles.dotNeg,
-    neu: styles.dotNeu,
+  function SourceTag({ source, url }: { source: string; url: string }) {
+    if (url) {
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${styles.sourceTag} ${styles.sourceTagLink}`}
+        >
+          {source} ↗
+        </a>
+      )
+    }
+    return <span className={styles.sourceTag}>{source}</span>
   }
 
   return (
@@ -186,19 +203,22 @@ export default function Home() {
               </div>
             </div>
 
+            <div className={styles.categoryHint}>
+              <span className={styles.categoryHintIcon}>↳</span>
+              Category shapes the analysis. Selecting <span className={styles.categoryHintHighlight}>AI / LLM</span> for Notion surfaces different signals than <span className={styles.categoryHintHighlight}>Project management</span> — pick the lens that matches how you see the market.
+            </div>
+
             <div className={styles.tokenBar}>
-              <div>
-                <div className={styles.pips}>
-                  {Array.from({ length: DAILY_LIMIT }, (_, i) => (
-                    <div key={i} className={`${styles.pip} ${i < remaining ? styles.pipActive : ''}`} />
-                  ))}
-                </div>
-                <p className={styles.tokenLabel}>
-                  {remaining === 0
-                    ? 'Daily limit reached — resets at midnight'
-                    : `${remaining} ${remaining === 1 ? 'analysis' : 'analyses'} remaining today`}
-                </p>
+              <div className={styles.pips}>
+                {Array.from({ length: DAILY_LIMIT }, (_, i) => (
+                  <div key={i} className={`${styles.pip} ${i < remaining ? styles.pipActive : ''}`} />
+                ))}
               </div>
+              <p className={styles.tokenLabel}>
+                {remaining === 0
+                  ? 'Daily limit reached — resets at midnight'
+                  : `${remaining} ${remaining === 1 ? 'analysis' : 'analyses'} remaining today`}
+              </p>
             </div>
 
             <button className={styles.analyzeBtn} onClick={analyze} disabled={remaining === 0}>
@@ -238,9 +258,7 @@ export default function Home() {
               <button className={styles.resetBtn} onClick={reset}>← New analysis</button>
             </div>
 
-            {/* Two-column layout */}
             <div className={styles.panelGrid}>
-
               {/* Left: Activity + Community */}
               <div className={styles.panelLeft}>
                 <div className={styles.sectionCard}>
@@ -253,7 +271,7 @@ export default function Home() {
                       <div key={i} className={styles.item}>
                         <p className={styles.itemTitle}>{item.title}</p>
                         <p className={styles.itemBody}>{item.body}</p>
-                        <span className={styles.sourceTag}>{item.source}</span>
+                        <SourceTag source={item.source} url={item.url} />
                       </div>
                     ))}
                 </div>
@@ -268,7 +286,7 @@ export default function Home() {
                       <div key={i} className={styles.item}>
                         <p className={styles.itemTitle}>{item.title}</p>
                         <p className={styles.itemBody}>{item.body}</p>
-                        <span className={styles.sourceTag}>{item.source}</span>
+                        <SourceTag source={item.source} url={item.url} />
                       </div>
                     ))}
                 </div>
@@ -279,6 +297,7 @@ export default function Home() {
                 <div className={styles.sectionCard}>
                   <div className={styles.sectionHead}>
                     <span className={styles.sectionLabel}>Review sentiment</span>
+                    <span className={styles.sectionSubLabel}>Score = satisfaction (100 = users love it)</span>
                   </div>
                   {(brief.sentiment || []).length === 0
                     ? <p className={styles.itemBody}>No review data found.</p>
@@ -286,14 +305,14 @@ export default function Home() {
                       <div key={i} className={styles.sentimentItem}>
                         <div className={styles.sentimentTop}>
                           <div className={styles.sentimentMeta}>
-                            <span className={`${styles.sentimentDot} ${sentimentDot[item.direction] || styles.dotNeu}`} />
+                            <span className={`${styles.sentimentDot} ${scoreToDotClass(item.score)}`} />
                             <span className={styles.sentimentLabel}>{item.label}</span>
                           </div>
                           <span className={styles.sentimentPct}>{Math.round(item.score)}</span>
                         </div>
                         <div className={styles.sentimentBarWrap}>
                           <div
-                            className={`${styles.sentimentBar} ${sentimentColor[item.direction] || styles.barNeu}`}
+                            className={`${styles.sentimentBar} ${scoreToBarClass(item.score)}`}
                             style={{ width: `${Math.round(item.score)}%` }}
                           />
                         </div>
@@ -306,7 +325,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Footer disclaimers */}
+            {/* Footer */}
             <div className={styles.footer}>
               <p className={styles.footerText}>
                 Sentiment and signals reflect publicly available user opinions and community discussions — not the views of Parrot or its creators.
