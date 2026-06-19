@@ -35,6 +35,7 @@ Rules:
 - activity: 2-3 items only
 - community: 2-3 items only
 - sentiment: 3-4 items only
+- Do not include any citation tags or markup in string values
 - If you cannot find real data for a field, omit that item rather than fabricate
 - Return valid JSON only, nothing else`
 
@@ -79,6 +80,28 @@ Rules:
     }
 
     const parsed = JSON.parse(jsonMatch[0])
+
+    // Strip citation tags the web search tool injects into body text
+    function stripCitations(text: string): string {
+      return text.replace(/<cite[^>]*>|<\/cite>/g, '').trim()
+    }
+
+    if (parsed.activity) {
+      parsed.activity = parsed.activity.map((i: { title: string; body: string; source: string }) => ({
+        ...i, title: stripCitations(i.title), body: stripCitations(i.body)
+      }))
+    }
+    if (parsed.community) {
+      parsed.community = parsed.community.map((i: { title: string; body: string; source: string }) => ({
+        ...i, title: stripCitations(i.title), body: stripCitations(i.body)
+      }))
+    }
+    if (parsed.sentiment) {
+      parsed.sentiment = parsed.sentiment.map((i: { label: string; score: number; direction: string }) => ({
+        ...i, label: stripCitations(i.label)
+      }))
+    }
+
     return NextResponse.json(parsed)
 
   } catch (err) {
