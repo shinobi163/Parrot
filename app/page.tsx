@@ -10,7 +10,7 @@ type Direction = 'pos' | 'neg' | 'neu'
 
 interface ActivityItem { title: string; body: string; source: string }
 interface CommunityItem { title: string; body: string; source: string }
-interface SentimentItem { label: string; score: number; direction: Direction }
+interface SentimentItem { label: string; score: number; direction: Direction; summary: string }
 interface Brief {
   activity: ActivityItem[]
   community: CommunityItem[]
@@ -78,7 +78,6 @@ export default function Home() {
     setActiveStep(0)
     setDoneSteps([])
 
-    // Animate steps
     let step = 0
     const interval = setInterval(() => {
       setDoneSteps(prev => step > 0 ? [...prev, step - 1] : prev)
@@ -124,15 +123,21 @@ export default function Home() {
     setDoneSteps([])
   }
 
-  const barClass: Record<Direction, string> = {
+  const sentimentColor: Record<Direction, string> = {
     pos: styles.barPos,
     neg: styles.barNeg,
     neu: styles.barNeu,
   }
 
+  const sentimentDot: Record<Direction, string> = {
+    pos: styles.dotPos,
+    neg: styles.dotNeg,
+    neu: styles.dotNeu,
+  }
+
   return (
     <main className={styles.main}>
-      <div className={styles.container}>
+      <div className={screen === 'results' ? styles.containerWide : styles.container}>
 
         {/* Logo */}
         <div className={styles.logo}>
@@ -196,11 +201,7 @@ export default function Home() {
               </div>
             </div>
 
-            <button
-              className={styles.analyzeBtn}
-              onClick={analyze}
-              disabled={remaining === 0}
-            >
+            <button className={styles.analyzeBtn} onClick={analyze} disabled={remaining === 0}>
               Analyze competitor
             </button>
 
@@ -232,62 +233,87 @@ export default function Home() {
             <div className={styles.resultsHeader}>
               <div>
                 <p className={styles.resultsTitle}>{analyzedName}</p>
-                <p className={styles.resultsMeta}>{analyzedUrl} · {analyzedAt}</p>
+                <p className={styles.resultsMeta}>{analyzedUrl} · {analyzedAt} · {category}</p>
               </div>
               <button className={styles.resetBtn} onClick={reset}>← New analysis</button>
             </div>
 
-            {/* Activity */}
-            <div className={styles.sectionCard}>
-              <div className={styles.sectionHead}>
-                <span className={styles.sectionLabel}>Recent activity</span>
-              </div>
-              {(brief.activity || []).length === 0
-                ? <p className={styles.itemBody}>No recent activity found.</p>
-                : brief.activity.map((item, i) => (
-                  <div key={i} className={styles.item}>
-                    <p className={styles.itemTitle}>{item.title}</p>
-                    <p className={styles.itemBody}>{item.body}</p>
-                    <span className={styles.sourceTag}>{item.source}</span>
+            {/* Two-column layout */}
+            <div className={styles.panelGrid}>
+
+              {/* Left: Activity + Community */}
+              <div className={styles.panelLeft}>
+                <div className={styles.sectionCard}>
+                  <div className={styles.sectionHead}>
+                    <span className={styles.sectionLabel}>Recent activity</span>
                   </div>
-                ))}
+                  {(brief.activity || []).length === 0
+                    ? <p className={styles.itemBody}>No recent activity found.</p>
+                    : brief.activity.map((item, i) => (
+                      <div key={i} className={styles.item}>
+                        <p className={styles.itemTitle}>{item.title}</p>
+                        <p className={styles.itemBody}>{item.body}</p>
+                        <span className={styles.sourceTag}>{item.source}</span>
+                      </div>
+                    ))}
+                </div>
+
+                <div className={styles.sectionCard}>
+                  <div className={styles.sectionHead}>
+                    <span className={styles.sectionLabel}>Community signal</span>
+                  </div>
+                  {(brief.community || []).length === 0
+                    ? <p className={styles.itemBody}>No community discussions found.</p>
+                    : brief.community.map((item, i) => (
+                      <div key={i} className={styles.item}>
+                        <p className={styles.itemTitle}>{item.title}</p>
+                        <p className={styles.itemBody}>{item.body}</p>
+                        <span className={styles.sourceTag}>{item.source}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Right: Sentiment */}
+              <div className={styles.panelRight}>
+                <div className={styles.sectionCard}>
+                  <div className={styles.sectionHead}>
+                    <span className={styles.sectionLabel}>Review sentiment</span>
+                  </div>
+                  {(brief.sentiment || []).length === 0
+                    ? <p className={styles.itemBody}>No review data found.</p>
+                    : brief.sentiment.map((item, i) => (
+                      <div key={i} className={styles.sentimentItem}>
+                        <div className={styles.sentimentTop}>
+                          <div className={styles.sentimentMeta}>
+                            <span className={`${styles.sentimentDot} ${sentimentDot[item.direction] || styles.dotNeu}`} />
+                            <span className={styles.sentimentLabel}>{item.label}</span>
+                          </div>
+                          <span className={styles.sentimentPct}>{Math.round(item.score)}</span>
+                        </div>
+                        <div className={styles.sentimentBarWrap}>
+                          <div
+                            className={`${styles.sentimentBar} ${sentimentColor[item.direction] || styles.barNeu}`}
+                            style={{ width: `${Math.round(item.score)}%` }}
+                          />
+                        </div>
+                        {item.summary && (
+                          <p className={styles.sentimentSummary}>{item.summary}</p>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
             </div>
 
-            {/* Community */}
-            <div className={styles.sectionCard}>
-              <div className={styles.sectionHead}>
-                <span className={styles.sectionLabel}>Community signal</span>
-              </div>
-              {(brief.community || []).length === 0
-                ? <p className={styles.itemBody}>No community discussions found.</p>
-                : brief.community.map((item, i) => (
-                  <div key={i} className={styles.item}>
-                    <p className={styles.itemTitle}>{item.title}</p>
-                    <p className={styles.itemBody}>{item.body}</p>
-                    <span className={styles.sourceTag}>{item.source}</span>
-                  </div>
-                ))}
-            </div>
-
-            {/* Sentiment */}
-            <div className={styles.sectionCard}>
-              <div className={styles.sectionHead}>
-                <span className={styles.sectionLabel}>Review sentiment</span>
-              </div>
-              {(brief.sentiment || []).length === 0
-                ? <p className={styles.itemBody}>No review data found.</p>
-                : brief.sentiment.map((item, i) => (
-                  <div key={i} className={styles.sentimentRow}>
-                    <span className={styles.sentimentLabel}>{item.label}</span>
-                    <div className={styles.sentimentBarWrap}>
-                      <div
-                        className={`${styles.sentimentBar} ${barClass[item.direction] || styles.barNeu}`}
-                        style={{ width: `${Math.round(item.score)}%` }}
-                      />
-                    </div>
-                    <span className={styles.sentimentPct}>{Math.round(item.score)}</span>
-                  </div>
-                ))}
+            {/* Footer disclaimers */}
+            <div className={styles.footer}>
+              <p className={styles.footerText}>
+                Sentiment and signals reflect publicly available user opinions and community discussions — not the views of Parrot or its creators.
+              </p>
+              <p className={styles.footerText}>
+                This analysis is generated by an AI model and may contain inaccuracies. Verify critical information independently before making decisions.
+              </p>
             </div>
           </div>
         )}
