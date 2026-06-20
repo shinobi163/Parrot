@@ -719,8 +719,6 @@ export default function Home() {
             <div className={styles.compareTab}>
               <div className={styles.compareFields}>
                 <p className={styles.compareTabHint}>Add 1-2 brands from the same sector and category to compare against <strong>{analyzedName}</strong>.</p>
-
-              <div>
                   {compareBrands.map((brand, i) => (
                     <div key={i} className={styles.compareBrandRow}>
                       <div className={styles.compareBrandInputs}>
@@ -748,7 +746,6 @@ export default function Home() {
                   </button>
 
                   {compareError && <p className={styles.error}>{compareError}</p>}
-                </div>
 
               {/* Comparison results */}
               {comparison && (
@@ -802,8 +799,9 @@ export default function Home() {
                       </div>
                     ))}
                   </div>
-                </div>
               )}
+              </div>
+            </div>
             </div>
             )}
 
