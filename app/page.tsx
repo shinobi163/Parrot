@@ -7,6 +7,7 @@ const DAILY_LIMIT = 3
 const STORAGE_KEY = 'parrot_usage'
 const HISTORY_KEY = 'parrot_history'
 const MAX_HISTORY = 5
+const CACHE_MAX_AGE_DAYS = 30
 
 type Direction = 'pos' | 'neg' | 'neu'
 
@@ -25,7 +26,16 @@ interface Brief {
 
 interface HistoryEntry {
   name: string; url: string; sector: string; category: string
-  timeRange: string; date: string; brief: Brief
+  timeRange: string; date: string; timestamp: number; brief: Brief
+}
+
+interface ComparisonBrand { name: string; url: string }
+interface ComparisonStrength { theme: string; description: string }
+interface ComparisonBrandResult { name: string; unique: string; topPositive: string; topNegative: string }
+interface Comparison {
+  sharedStrengths: ComparisonStrength[]
+  sharedWeaknesses: ComparisonStrength[]
+  brands: ComparisonBrandResult[]
 }
 
 function getToday() { return new Date().toISOString().slice(0, 10) }
@@ -61,7 +71,12 @@ function saveToHistory(entry: HistoryEntry) {
 
 function getCached(name: string): HistoryEntry | null {
   const history = getHistory()
-  return history.find(h => h.name.toLowerCase() === name.toLowerCase()) || null
+  const entry = history.find(h => h.name.toLowerCase() === name.toLowerCase())
+  if (!entry) return null
+  const ageMs = Date.now() - (entry.timestamp || 0)
+  const ageDays = ageMs / (1000 * 60 * 60 * 24)
+  if (ageDays > CACHE_MAX_AGE_DAYS) return null
+  return entry
 }
 
 function scoreToBarClass(score: number, s: Record<string, string>): string {
@@ -188,6 +203,13 @@ export default function Home() {
   const [copied, setCopied] = useState(false)
   const [keywordFilter, setKeywordFilter] = useState<'all' | 'pos' | 'neg'>('all')
 
+  // Comparison state
+  const [compareOpen, setCompareOpen] = useState(false)
+  const [compareBrands, setCompareBrands] = useState<ComparisonBrand[]>([{ name: '', url: '' }])
+  const [compareLoading, setCompareLoading] = useState(false)
+  const [compareError, setCompareError] = useState('')
+  const [comparison, setComparison] = useState<Comparison | null>(null)
+
   useEffect(() => {
     setRemaining(Math.max(0, DAILY_LIMIT - getUsage().count))
     setHistory(getHistory())
@@ -214,6 +236,8 @@ export default function Home() {
       setAnalyzedCategory(cached.category)
       setAnalyzedTimeRange(cached.timeRange || '6m')
       setFromCache(true)
+      setComparison(null)
+      setCompareOpen(false)
       setScreen('results')
       return
     }
@@ -227,6 +251,8 @@ export default function Home() {
     setAnalyzedCategory(category)
     setAnalyzedTimeRange(timeRange)
     setFromCache(false)
+    setComparison(null)
+    setCompareOpen(false)
     setScreen('loading')
     setActiveStep(0)
     setDoneSteps([])
@@ -240,7 +266,6 @@ export default function Home() {
 
     try {
       const userContext = hasContext ? { idea: idea.trim(), audience: audience.trim(), edge: edge.trim() } : null
-
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -259,7 +284,7 @@ export default function Home() {
       setRemaining(Math.max(0, DAILY_LIMIT - newCount))
 
       const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      const entry: HistoryEntry = { name: name.trim(), url: url.trim(), sector, category, timeRange, date: dateStr, brief: data }
+      const entry: HistoryEntry = { name: name.trim(), url: url.trim(), sector, category, timeRange, date: dateStr, timestamp: Date.now(), brief: data }
       const updated = saveToHistory(entry)
       setHistory(updated)
       setBrief(data)
@@ -281,6 +306,8 @@ export default function Home() {
     setAnalyzedCategory(entry.category)
     setAnalyzedTimeRange(entry.timeRange || '6m')
     setFromCache(true)
+    setComparison(null)
+    setCompareOpen(false)
     setSidebarOpen(false)
     setScreen('results')
   }
@@ -288,6 +315,8 @@ export default function Home() {
   function reset() {
     setScreen('input'); setError(''); setActiveStep(-1)
     setDoneSteps([]); setSidebarOpen(false); setCopied(false)
+    setComparison(null); setCompareOpen(false)
+    setCompareBrands([{ name: '', url: '' }])
   }
 
   function refreshAnalysis() {
@@ -299,6 +328,7 @@ export default function Home() {
     setSector(analyzedSector); setCategory(analyzedCategory)
     setTimeRange(analyzedTimeRange)
     setScreen('input'); setFromCache(false); setCopied(false)
+    setComparison(null); setCompareOpen(false)
   }
 
   async function copyBrief() {
@@ -312,6 +342,75 @@ export default function Home() {
       el.value = text; document.body.appendChild(el); el.select()
       document.execCommand('copy'); document.body.removeChild(el)
       setCopied(true); setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  function updateCompareBrand(index: number, field: keyof ComparisonBrand, value: string) {
+    setCompareBrands(prev => prev.map((b, i) => i === index ? { ...b, [field]: value } : b))
+  }
+
+  function addCompareBrand() {
+    if (compareBrands.length < 2) setCompareBrands(prev => [...prev, { name: '', url: '' }])
+  }
+
+  function removeCompareBrand(index: number) {
+    setCompareBrands(prev => prev.filter((_, i) => i !== index))
+  }
+
+  async function runComparison() {
+    setCompareError('')
+    const validBrands = compareBrands.filter(b => b.name.trim() && b.url.trim())
+    if (validBrands.length === 0) { setCompareError('Add at least one brand to compare.'); return }
+
+    setCompareLoading(true)
+
+    const brands = [
+      { name: analyzedName, url: analyzedUrl, sector: analyzedSector, category: analyzedCategory, timeRange: analyzedTimeRange, cachedBrief: brief },
+      ...validBrands.map(b => {
+        const cached = getCached(b.name.trim())
+        return {
+          name: b.name.trim(),
+          url: b.url.trim(),
+          sector: analyzedSector,
+          category: analyzedCategory,
+          timeRange: analyzedTimeRange,
+          cachedBrief: cached?.brief || null
+        }
+      })
+    ]
+
+    try {
+      const res = await fetch('/api/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brands }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Comparison failed.')
+
+      // Save newly fetched briefs to history
+      if (data.fetchedBriefs) {
+        const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        for (const fb of data.fetchedBriefs) {
+          const brand = validBrands.find(b => b.name.trim() === fb.name)
+          if (brand) {
+            const entry: HistoryEntry = {
+              name: fb.name, url: brand.url.trim(),
+              sector: analyzedSector, category: analyzedCategory,
+              timeRange: analyzedTimeRange, date: dateStr,
+              timestamp: Date.now(), brief: fb.brief
+            }
+            saveToHistory(entry)
+          }
+        }
+        setHistory(getHistory())
+      }
+
+      setComparison(data.comparison)
+    } catch (e: unknown) {
+      setCompareError(e instanceof Error ? e.message : 'Comparison failed.')
+    } finally {
+      setCompareLoading(false)
     }
   }
 
@@ -337,7 +436,7 @@ export default function Home() {
             ))}
           </div>
         )}
-        <p className={styles.sidebarFooter}>Showing up to {MAX_HISTORY} most recent</p>
+        <p className={styles.sidebarFooter}>Showing up to {MAX_HISTORY} most recent · Cache valid 30 days</p>
       </div>
 
       <div className={screen === 'results' ? styles.containerWide : styles.container}>
@@ -398,7 +497,6 @@ export default function Home() {
               Sector and category shape what signals Parrot looks for. <span className={styles.categoryHintHighlight}>Swiggy under Food Delivery</span> surfaces different intelligence than <span className={styles.categoryHintHighlight}>Swiggy under Hyperlocal</span>.
             </div>
 
-            {/* Collapsible context */}
             <button className={styles.contextToggle} onClick={() => setContextOpen(o => !o)}>
               <span>{contextOpen ? '▾' : '▸'} Add your context</span>
               <span className={styles.contextToggleHint}>{hasContext ? 'filled' : 'optional — unlocks personalised insight'}</span>
@@ -566,12 +664,12 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Insight panel — full width, only when present */}
+            {/* Insight panel */}
             {brief.insight && (
               <div className={styles.insightCard}>
                 <div className={styles.insightHeader}>
                   <span className={styles.insightTitle}>What this means for you</span>
-                  <span className={styles.insightModel}>claude sonnet</span>
+                  <span className={styles.insightModel}>gemini flash lite</span>
                 </div>
                 <div className={styles.insightGrid}>
                   <div className={styles.insightItem}>
@@ -593,6 +691,101 @@ export default function Home() {
                 </div>
               </div>
             )}
+
+            {/* Compare section */}
+            <div className={styles.compareSection}>
+              <button className={styles.compareToggle} onClick={() => setCompareOpen(o => !o)}>
+                <span>{compareOpen ? '▾' : '▸'} Compare with other brands</span>
+                <span className={styles.contextToggleHint}>same sector · up to 2 more brands</span>
+              </button>
+
+              {compareOpen && (
+                <div className={styles.compareFields}>
+                  {compareBrands.map((brand, i) => (
+                    <div key={i} className={styles.compareBrandRow}>
+                      <div className={styles.compareBrandInputs}>
+                        <input className={styles.input} type="text" placeholder={`Brand ${i + 2} name`}
+                          value={brand.name} onChange={e => updateCompareBrand(i, 'name', e.target.value)} />
+                        <input className={styles.input} type="text" placeholder="website.com"
+                          value={brand.url} onChange={e => updateCompareBrand(i, 'url', e.target.value)} />
+                      </div>
+                      {compareBrands.length > 1 && (
+                        <button className={styles.removeBtn} onClick={() => removeCompareBrand(i)}>✕</button>
+                      )}
+                    </div>
+                  ))}
+
+                  {compareBrands.length < 2 && (
+                    <button className={styles.addBrandBtn} onClick={addCompareBrand}>+ Add another brand</button>
+                  )}
+
+                  <div className={styles.compareHint}>
+                    Sector and category locked to <strong>{analyzedSector} · {analyzedCategory}</strong>
+                  </div>
+
+                  <button className={styles.analyzeBtn} onClick={runComparison} disabled={compareLoading}>
+                    {compareLoading ? 'Comparing...' : 'Run comparison'}
+                  </button>
+
+                  {compareError && <p className={styles.error}>{compareError}</p>}
+                </div>
+              )}
+
+              {/* Comparison results */}
+              {comparison && (
+                <div className={styles.comparisonResults}>
+                  <div className={styles.comparisonGrid}>
+                    <div className={styles.sectionCard}>
+                      <div className={styles.sectionHead}>
+                        <span className={styles.sectionLabel}>Shared strengths</span>
+                        <span className={styles.sectionSubLabel}>what the whole category does well</span>
+                      </div>
+                      {comparison.sharedStrengths.map((item, i) => (
+                        <div key={i} className={styles.item}>
+                          <p className={styles.itemTitle}>{item.theme}</p>
+                          <p className={styles.itemBody}>{item.description}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className={styles.sectionCard}>
+                      <div className={styles.sectionHead}>
+                        <span className={styles.sectionLabel}>Category gap</span>
+                        <span className={styles.sectionSubLabel}>complaints nobody has fixed</span>
+                      </div>
+                      {comparison.sharedWeaknesses.map((item, i) => (
+                        <div key={i} className={styles.item}>
+                          <p className={styles.itemTitle}>{item.theme}</p>
+                          <p className={styles.itemBody}>{item.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className={styles.brandCompareGrid}>
+                    {comparison.brands.map((brand, i) => (
+                      <div key={i} className={styles.sectionCard}>
+                        <div className={styles.sectionHead}>
+                          <span className={styles.sectionLabel}>{brand.name}</span>
+                        </div>
+                        <div className={styles.brandCompareItem}>
+                          <p className={styles.brandCompareLabel} style={{ color: '#639922' }}>What sets them apart</p>
+                          <p className={styles.itemBody}>{brand.unique}</p>
+                        </div>
+                        <div className={styles.brandCompareItem}>
+                          <p className={styles.brandCompareLabel} style={{ color: '#639922' }}>Users love</p>
+                          <p className={styles.itemBody}>{brand.topPositive}</p>
+                        </div>
+                        <div className={styles.brandCompareItem}>
+                          <p className={styles.brandCompareLabel} style={{ color: '#e24b4a' }}>Users complain about</p>
+                          <p className={styles.itemBody}>{brand.topNegative}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className={styles.footer}>
               <p className={styles.footerText}>Sentiment and signals reflect publicly available user opinions and community discussions — not the views of Parrot or its creators.</p>
