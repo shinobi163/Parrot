@@ -11,179 +11,155 @@ const TIME_RANGE_LABELS: Record<string, string> = {
   'all': 'all time',
 }
 
-export async function POST(req: NextRequest) {
-  const { name, url, sector, category, timeRange, userContext } = await req.json()
+interface BriefInput {
+  name: string
+  url: string
+  sector: string
+  category: string
+  timeRange: string
+  cachedBrief?: object
+}
 
-  if (!name || !url || !sector || !category) {
-    return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 })
-  }
-
-  const timeLabel = TIME_RANGE_LABELS[timeRange] || 'last 6 months'
-  const yearHint = timeRange === '30d' ? '2025' : timeRange === '6m' ? '2025' : '2024 OR 2025'
+async function fetchBrief(brand: BriefInput) {
+  const timeLabel = TIME_RANGE_LABELS[brand.timeRange] || 'last 6 months'
+  const yearHint = brand.timeRange === '30d' ? '2025' : brand.timeRange === '6m' ? '2025' : '2024 OR 2025'
 
   const prompt = `You are a market analyst. Research the brand below and return a JSON object ONLY — no preamble, no markdown fences, no explanation.
 
-Brand: ${name}
-Website: ${url}
-Sector: ${sector}
-Category: ${category}
-Time range: Focus on the ${timeLabel} only. Ignore older data unless nothing recent exists.
+Brand: ${brand.name}
+Website: ${brand.url}
+Sector: ${brand.sector}
+Category: ${brand.category}
+Time range: Focus on the ${timeLabel} only.
 
-Frame your entire analysis through the lens of a ${category} brand within the ${sector} sector. This determines which peer brands, communities, and review sources are relevant.
-
-Run a maximum of 4 web searches total. Use these searches:
-1. "${name} new feature launch ${yearHint}"
-2. "${name} site:reddit.com OR site:news.ycombinator.com ${yearHint}"
-3. "${name} reviews complaints ${yearHint}"
+Run a maximum of 3 web searches total:
+1. "${brand.name} new feature launch ${yearHint}"
+2. "${brand.name} site:reddit.com OR site:news.ycombinator.com ${yearHint}"
+3. "${brand.name} reviews complaints ${yearHint}"
 
 Return exactly this JSON structure:
 {
-  "activity": [
-    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Blog|Changelog|Press", "url": "direct URL or empty string" }
+  "activity": [{ "title": "string (8 words max)", "body": "string (25 words max)", "source": "Blog|Changelog|Press", "url": "" }],
+  "community": [{ "title": "string (8 words max)", "body": "string (25 words max)", "source": "Reddit|HN|ProductHunt", "url": "" }],
+  "sentiment": [{ "label": "string (3 words max)", "score": number_0_to_100, "direction": "pos|neg|neu", "summary": "string (15 words max)" }],
+  "keywords": [{ "word": "string (2 words max)", "weight": number_1_to_10, "direction": "pos|neg|neu" }]
+}
+
+Rules:
+- activity: 2 items only
+- community: 2 items only
+- sentiment: 3 items only
+- keywords: 8-10 items only
+- score = SATISFACTION (high = happy users, low = unhappy)
+- Do not include citation tags or markup
+- Return valid JSON only`
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 1500 }
+      })
+    }
+  )
+
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error?.message || 'Gemini error')
+
+  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!raw) throw new Error('No response text')
+
+  const match = raw.match(/\{[\s\S]*\}/)
+  if (!match) throw new Error('No JSON in response')
+
+  const parsed = JSON.parse(match[0])
+
+  if (parsed.activity) parsed.activity = parsed.activity.map((i: { title: string; body: string; source: string; url: string }) => ({ ...i, title: stripCitations(i.title), body: stripCitations(i.body), url: i.url || '' }))
+  if (parsed.community) parsed.community = parsed.community.map((i: { title: string; body: string; source: string; url: string }) => ({ ...i, title: stripCitations(i.title), body: stripCitations(i.body), url: i.url || '' }))
+  if (parsed.sentiment) parsed.sentiment = parsed.sentiment.map((i: { label: string; score: number; direction: string; summary: string }) => ({ ...i, label: stripCitations(i.label), summary: i.summary ? stripCitations(i.summary) : '' }))
+  if (parsed.keywords) parsed.keywords = parsed.keywords.map((i: { word: string; weight: number; direction: string }) => ({ ...i, word: stripCitations(i.word) }))
+
+  return parsed
+}
+
+export async function POST(req: NextRequest) {
+  const { brands } = await req.json()
+
+  if (!brands || brands.length < 2 || brands.length > 3) {
+    return NextResponse.json({ error: 'Provide 2-3 brands to compare.' }, { status: 400 })
+  }
+
+  try {
+    // Fetch briefs for brands that don't have a cached one
+    const briefs = await Promise.all(
+      brands.map(async (brand: BriefInput) => {
+        if (brand.cachedBrief) return { name: brand.name, brief: brand.cachedBrief }
+        const brief = await fetchBrief(brand)
+        return { name: brand.name, brief }
+      })
+    )
+
+    // Synthesis call — no web search, reasoning over briefs only
+    const synthPrompt = `You are a market analyst. Compare the following brands based on their market signal data and return a JSON object ONLY.
+
+${briefs.map(b => `${b.name}:\n${JSON.stringify(b.brief)}`).join('\n\n')}
+
+Return exactly this JSON structure:
+{
+  "sharedStrengths": [
+    { "theme": "string (5 words max)", "description": "string (30 words max)" }
   ],
-  "community": [
-    { "title": "string (8 words max)", "body": "string (30 words max)", "source": "Reddit|HN|ProductHunt", "url": "direct URL or empty string" }
+  "sharedWeaknesses": [
+    { "theme": "string (5 words max)", "description": "string (30 words max)" }
   ],
-  "sentiment": [
-    { "label": "string (3 words max)", "score": number_0_to_100, "direction": "pos|neg|neu", "summary": "string (20 words max)" }
-  ],
-  "keywords": [
-    { "word": "single word or short phrase (2 words max)", "weight": number_1_to_10, "direction": "pos|neg|neu" }
+  "brands": [
+    {
+      "name": "brand name",
+      "unique": "string (40 words max — what makes this brand distinctly different from the others in user perception)",
+      "topPositive": "string (20 words max — what users love most)",
+      "topNegative": "string (20 words max — what users complain about most)"
+    }
   ]
 }
 
 Rules:
-- activity: 2-3 items only
-- community: 2-3 items only
-- sentiment: 3-4 items only
-- score means SATISFACTION level: high (70-100) = users happy, low (0-30) = users unhappy, mid (40-60) = mixed
-- direction: pos = users praise this, neg = users complain about this, neu = mixed or neutral
-- summary: one plain sentence e.g. "Users love the speed and simplicity" or "Frequent complaints about pricing"
-- keywords: 12-18 words extracted from community discussions and review sentiment only. weight = frequency/strength (1=rarely, 10=very frequently). direction = sentiment toward that keyword
-- url: actual URL if found, otherwise empty string ""
-- Do not include any citation tags or markup in string values
-- If you cannot find real data for a field, omit that item rather than fabricate
+- sharedStrengths: 2-3 items that appear positively across multiple brands
+- sharedWeaknesses: 2-3 complaints that appear across multiple brands — this is the unresolved category gap
+- brands: one entry per brand, in the same order as input
+- Stay grounded in the signal data provided. Do not invent.
+- Do not include citation tags or markup
 - Return valid JSON only, nothing else`
 
-  try {
-    const geminiResponse = await fetch(
+    const synthResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          tools: [{ google_search: {} }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 2000 }
+          contents: [{ parts: [{ text: synthPrompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 1500 }
         })
       }
     )
 
-    const geminiData = await geminiResponse.json()
+    const synthData = await synthResponse.json()
+    const synthRaw = synthData.candidates?.[0]?.content?.parts?.[0]?.text
 
-    if (!geminiResponse.ok) {
-      console.error('Gemini error:', geminiData)
-      return NextResponse.json({ error: geminiData.error?.message || 'Gemini API error' }, { status: 500 })
-    }
+    if (!synthRaw) throw new Error('No synthesis response')
 
-    const raw = geminiData.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!raw) {
-      console.error('No text in Gemini response:', JSON.stringify(geminiData))
-      return NextResponse.json({ error: 'No text response from model.' }, { status: 500 })
-    }
+    const synthMatch = synthRaw.replace(/```json|```/g, '').trim().match(/\{[\s\S]*\}/)
+    if (!synthMatch) throw new Error('No JSON in synthesis')
 
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      console.error('No JSON found in response:', raw)
-      return NextResponse.json({ error: 'Could not parse response.' }, { status: 500 })
-    }
+    const comparison = JSON.parse(synthMatch[0])
 
-    const parsed = JSON.parse(jsonMatch[0])
-
-    if (parsed.activity) {
-      parsed.activity = parsed.activity.map((i: { title: string; body: string; source: string; url: string }) => ({
-        ...i, title: stripCitations(i.title), body: stripCitations(i.body), url: i.url || ''
-      }))
-    }
-    if (parsed.community) {
-      parsed.community = parsed.community.map((i: { title: string; body: string; source: string; url: string }) => ({
-        ...i, title: stripCitations(i.title), body: stripCitations(i.body), url: i.url || ''
-      }))
-    }
-    if (parsed.sentiment) {
-      parsed.sentiment = parsed.sentiment.map((i: { label: string; score: number; direction: string; summary: string }) => ({
-        ...i, label: stripCitations(i.label), summary: i.summary ? stripCitations(i.summary) : ''
-      }))
-    }
-    if (parsed.keywords) {
-      parsed.keywords = parsed.keywords.map((i: { word: string; weight: number; direction: string }) => ({
-        ...i, word: stripCitations(i.word)
-      }))
-    }
-
-    // Insight call — Gemini, no web search, reasoning over existing data only
-    if (userContext?.idea || userContext?.audience || userContext?.edge) {
-      const insightPrompt = `You are a sharp market analyst helping a founder or PM understand what a brand's market signal means for their specific idea.
-
-Brand analyzed: ${name} (${category} · ${sector})
-Time range: ${timeLabel}
-
-What the market signal shows:
-RECENT ACTIVITY: ${JSON.stringify(parsed.activity)}
-COMMUNITY SIGNAL: ${JSON.stringify(parsed.community)}
-SENTIMENT: ${JSON.stringify(parsed.sentiment)}
-
-The user's context:
-- What they're building: ${userContext.idea || 'Not specified'}
-- Who it's for: ${userContext.audience || 'Not specified'}
-- Their edge: ${userContext.edge || 'Not specified'}
-
-Return a JSON object ONLY with this exact structure:
-{
-  "overlap": "2-3 sentences. Where ${name} already plays well and owns the market. Grounded in the signal above.",
-  "weakness": "2-3 sentences. Specific unresolved complaints from the signal directly relevant to the user's idea. Paraphrase actual signal where possible.",
-  "gap": "1-2 sentences. The intersection of their weakness and the user's stated edge. Be direct, not hedged.",
-  "watch": "1-2 sentences. One or two signals from the brief worth monitoring given the user's specific idea. Not warnings — just things to track."
-}
-
-Rules:
-- Stay grounded in the signal data. Do not invent insight not present in the data.
-- Do not give a verdict. Do not say "you should build this" or "don't build this".
-- Do not use filler phrases like "it's worth noting" or "interestingly".
-- Be direct. One idea per sentence.
-- Return valid JSON only, nothing else.`
-
-      try {
-        const insightResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: insightPrompt }] }],
-              generationConfig: { temperature: 0.1, maxOutputTokens: 1000 }
-            })
-          }
-        )
-
-        const insightData = await insightResponse.json()
-        const insightRaw = insightData.candidates?.[0]?.content?.parts?.[0]?.text
-
-        if (insightRaw) {
-          const insightMatch = insightRaw.replace(/```json|```/g, '').trim().match(/\{[\s\S]*\}/)
-          if (insightMatch) {
-            parsed.insight = JSON.parse(insightMatch[0])
-          }
-        }
-      } catch (insightErr) {
-        console.error('Insight call failed (non-fatal):', insightErr)
-      }
-    }
-
-    return NextResponse.json(parsed)
+    return NextResponse.json({ comparison, fetchedBriefs: briefs.filter((b: { name: string; brief: object }) => !brands.find((brand: BriefInput) => brand.name === b.name && brand.cachedBrief)) })
 
   } catch (err) {
-    console.error('Server error:', err)
-    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+    console.error('Compare error:', err)
+    return NextResponse.json({ error: 'Comparison failed. Try again.' }, { status: 500 })
   }
 }
