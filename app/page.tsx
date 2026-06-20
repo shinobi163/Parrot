@@ -24,6 +24,7 @@ interface Brief {
 interface HistoryEntry {
   name: string
   url: string
+  sector: string
   category: string
   date: string
   brief: Brief
@@ -84,20 +85,18 @@ function keywordColor(direction: Direction): string {
 }
 
 function keywordOpacity(weight: number): number {
-  // weight 1-10 maps to opacity 0.4-1.0
   return 0.4 + (weight / 10) * 0.6
 }
 
 function keywordSize(weight: number): string {
-  // weight 1-10 maps to font-size 11px-22px
   const size = Math.round(11 + (weight / 10) * 11)
   return `${size}px`
 }
 
-function formatBriefAsText(name: string, url: string, category: string, date: string, brief: Brief): string {
+function formatBriefAsText(name: string, url: string, sector: string, category: string, date: string, brief: Brief): string {
   const lines: string[] = []
-  lines.push(`PARROT — Competitive Brief`)
-  lines.push(`${name} · ${url} · ${category} · ${date}`)
+  lines.push(`PARROT — Market Signal`)
+  lines.push(`${name} · ${url} · ${sector} / ${category} · ${date}`)
   lines.push('')
   lines.push('RECENT ACTIVITY')
   lines.push('---------------')
@@ -115,11 +114,11 @@ function formatBriefAsText(name: string, url: string, category: string, date: st
     lines.push(`Source: ${item.source}${item.url ? ' — ' + item.url : ''}`)
     lines.push('')
   }
-  lines.push('REVIEW SENTIMENT')
+  lines.push('MARKET SENTIMENT')
   lines.push('----------------')
   for (const item of brief.sentiment || []) {
-    const bar = item.score >= 65 ? 'Positive' : item.score <= 35 ? 'Negative' : 'Mixed'
-    lines.push(`${item.label} — ${Math.round(item.score)}/100 (${bar})`)
+    const label = item.score >= 65 ? 'Positive' : item.score <= 35 ? 'Negative' : 'Mixed'
+    lines.push(`${item.label} — ${Math.round(item.score)}/100 (${label})`)
     if (item.summary) lines.push(item.summary)
     lines.push('')
   }
@@ -128,17 +127,29 @@ function formatBriefAsText(name: string, url: string, category: string, date: st
   return lines.join('\n')
 }
 
+const SECTOR_MAP: Record<string, string[]> = {
+  'Consumer & Retail': ['E-Commerce', 'D2C Brands', 'Hyperlocal', 'Grocery', 'Fashion & Apparel', 'Beauty & Personal Care', 'Electronics & Gadgets'],
+  'Fintech & Payments': ['Payments & Wallets', 'Neo-Banking', 'Lending & BNPL', 'Insurance', 'Wealth & Investing', 'Crypto'],
+  'Food & Beverage': ['Food Delivery', 'Cloud Kitchens', 'QSR Chains', 'Packaged Foods', 'Beverages & D2C Food'],
+  'Logistics & Supply Chain': ['Last-mile Delivery', 'Freight & B2B Logistics', 'Warehousing', 'Cross-border'],
+  'Media & Entertainment': ['Streaming', 'Gaming', 'Short Video', 'Podcasts', 'News & Publishing'],
+  'Health & Wellness': ['Telehealth', 'Fitness & D2C Wellness', 'Mental Health', 'Pharma & MedTech'],
+  'Travel & Hospitality': ['OTAs', 'Hotels & Stays', 'Experiences', 'Corporate Travel'],
+  'B2B & Enterprise SaaS': ['Developer Tools', 'Analytics', 'CRM & Sales', 'Marketing Tech', 'Project Management', 'AI / LLM'],
+  'HR & Workforce': ['Job Portals', 'ATS & Recruiting', 'Payroll & HRMS', 'Gig & Staffing'],
+  'Real Estate & PropTech': ['Residential', 'Commercial', 'Construction Tech', 'Property Management'],
+  'EdTech': ['K-12', 'Higher Ed', 'Upskilling & Courses', 'Language Learning'],
+  'Other': ['Other'],
+}
+
+const SECTORS = Object.keys(SECTOR_MAP)
+
 const STEPS = [
   'Reading blog and changelog',
   'Checking Reddit and Hacker News',
   'Scanning Product Hunt',
   'Pulling App Store reviews',
   'Synthesizing brief',
-]
-
-const CATEGORIES = [
-  'Project management', 'Developer tools', 'AI / LLM',
-  'Design tools', 'Analytics', 'CRM / Sales', 'Marketing', 'Other',
 ]
 
 function SourceTag({ source, url, s }: { source: string; url: string; s: Record<string, string> }) {
@@ -156,6 +167,7 @@ export default function Home() {
   const [screen, setScreen] = useState<'input' | 'loading' | 'results'>('input')
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
+  const [sector, setSector] = useState('')
   const [category, setCategory] = useState('')
   const [error, setError] = useState('')
   const [remaining, setRemaining] = useState(DAILY_LIMIT)
@@ -165,21 +177,29 @@ export default function Home() {
   const [analyzedName, setAnalyzedName] = useState('')
   const [analyzedUrl, setAnalyzedUrl] = useState('')
   const [analyzedAt, setAnalyzedAt] = useState('')
+  const [analyzedSector, setAnalyzedSector] = useState('')
   const [analyzedCategory, setAnalyzedCategory] = useState('')
   const [fromCache, setFromCache] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [copied, setCopied] = useState(false)
+  const [keywordFilter, setKeywordFilter] = useState<'all' | 'pos' | 'neg'>('all')
 
   useEffect(() => {
     setRemaining(Math.max(0, DAILY_LIMIT - getUsage().count))
     setHistory(getHistory())
   }, [])
 
+  function handleSectorChange(val: string) {
+    setSector(val)
+    setCategory('')
+  }
+
   async function analyze() {
     setError('')
-    if (!name.trim()) { setError('Enter a competitor name to continue.'); return }
-    if (!url.trim()) { setError('Enter the competitor website.'); return }
+    if (!name.trim()) { setError('Enter a brand name to continue.'); return }
+    if (!url.trim()) { setError('Enter the brand website.'); return }
+    if (!sector) { setError('Select a sector.'); return }
     if (!category) { setError('Select a category.'); return }
 
     const cached = getCached(name.trim())
@@ -188,6 +208,7 @@ export default function Home() {
       setAnalyzedName(cached.name)
       setAnalyzedUrl(cached.url)
       setAnalyzedAt(cached.date)
+      setAnalyzedSector(cached.sector || '')
       setAnalyzedCategory(cached.category)
       setFromCache(true)
       setScreen('results')
@@ -199,6 +220,7 @@ export default function Home() {
 
     setAnalyzedName(name.trim())
     setAnalyzedUrl(url.trim())
+    setAnalyzedSector(sector)
     setAnalyzedCategory(category)
     setFromCache(false)
     setScreen('loading')
@@ -216,7 +238,7 @@ export default function Home() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), url: url.trim(), category }),
+        body: JSON.stringify({ name: name.trim(), url: url.trim(), sector, category }),
       })
 
       clearInterval(interval)
@@ -231,7 +253,7 @@ export default function Home() {
       setRemaining(Math.max(0, DAILY_LIMIT - newCount))
 
       const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      const entry: HistoryEntry = { name: name.trim(), url: url.trim(), category, date: dateStr, brief: data }
+      const entry: HistoryEntry = { name: name.trim(), url: url.trim(), sector, category, date: dateStr, brief: data }
       const updated = saveToHistory(entry)
       setHistory(updated)
       setBrief(data)
@@ -249,6 +271,7 @@ export default function Home() {
     setAnalyzedName(entry.name)
     setAnalyzedUrl(entry.url)
     setAnalyzedAt(entry.date)
+    setAnalyzedSector(entry.sector || '')
     setAnalyzedCategory(entry.category)
     setFromCache(true)
     setSidebarOpen(false)
@@ -271,6 +294,7 @@ export default function Home() {
     setHistory(filtered)
     setName(analyzedName)
     setUrl(analyzedUrl)
+    setSector(analyzedSector)
     setCategory(analyzedCategory)
     setScreen('input')
     setFromCache(false)
@@ -279,7 +303,7 @@ export default function Home() {
 
   async function copyBrief() {
     if (!brief) return
-    const text = formatBriefAsText(analyzedName, analyzedUrl, analyzedCategory, analyzedAt, brief)
+    const text = formatBriefAsText(analyzedName, analyzedUrl, analyzedSector, analyzedCategory, analyzedAt, brief)
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
@@ -295,6 +319,8 @@ export default function Home() {
       setTimeout(() => setCopied(false), 2000)
     }
   }
+
+  const availableCategories = sector ? SECTOR_MAP[sector] || [] : []
 
   return (
     <main className={styles.main}>
@@ -312,7 +338,7 @@ export default function Home() {
             {history.map((entry, i) => (
               <button key={i} className={styles.sidebarItem} onClick={() => loadFromHistory(entry)}>
                 <span className={styles.sidebarItemName}>{entry.name}</span>
-                <span className={styles.sidebarItemMeta}>{entry.category} · {entry.date}</span>
+                <span className={styles.sidebarItemMeta}>{entry.sector ? `${entry.sector} · ` : ''}{entry.category} · {entry.date}</span>
               </button>
             ))}
           </div>
@@ -345,39 +371,51 @@ export default function Home() {
         {screen === 'input' && (
           <div className={styles.card}>
             <div className={styles.field}>
-              <label className={styles.label}>Competitor name</label>
+              <label className={styles.label}>Brand name</label>
               <input
                 className={styles.input}
                 type="text"
-                placeholder="e.g. Linear"
+                placeholder="e.g. Swiggy"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && analyze()}
               />
             </div>
+            <div className={styles.field}>
+              <label className={styles.label}>Website</label>
+              <input
+                className={styles.input}
+                type="text"
+                placeholder="swiggy.com"
+                value={url}
+                onChange={e => setUrl(e.target.value)}
+              />
+            </div>
             <div className={styles.row}>
               <div className={styles.field}>
-                <label className={styles.label}>Website</label>
-                <input
-                  className={styles.input}
-                  type="text"
-                  placeholder="linear.app"
-                  value={url}
-                  onChange={e => setUrl(e.target.value)}
-                />
+                <label className={styles.label}>Sector</label>
+                <select className={styles.input} value={sector} onChange={e => handleSectorChange(e.target.value)}>
+                  <option value="">Select sector...</option>
+                  {SECTORS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
               <div className={styles.field}>
                 <label className={styles.label}>Category</label>
-                <select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>
-                  <option value="">Select...</option>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                <select
+                  className={styles.input}
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  disabled={!sector}
+                >
+                  <option value="">{sector ? 'Select category...' : 'Select sector first'}</option>
+                  {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
             </div>
 
             <div className={styles.categoryHint}>
               <span className={styles.categoryHintIcon}>↳</span>
-              Category shapes the analysis. Selecting <span className={styles.categoryHintHighlight}>AI / LLM</span> for Notion surfaces different signals than <span className={styles.categoryHintHighlight}>Project management</span> — pick the lens that matches how you see the market.
+              Sector and category shape what signals Parrot looks for. <span className={styles.categoryHintHighlight}>Swiggy under Food Delivery</span> surfaces different intelligence than <span className={styles.categoryHintHighlight}>Swiggy under Hyperlocal</span> — pick the lens that matches how you see the market.
             </div>
 
             <div className={styles.tokenBar}>
@@ -394,7 +432,7 @@ export default function Home() {
             </div>
 
             <button className={styles.analyzeBtn} onClick={analyze} disabled={remaining === 0}>
-              Analyze competitor
+              Analyze brand
             </button>
 
             {error && <p className={styles.error}>{error}</p>}
@@ -423,7 +461,7 @@ export default function Home() {
               <div>
                 <p className={styles.resultsTitle}>{analyzedName}</p>
                 <div className={styles.resultsMetaRow}>
-                  <p className={styles.resultsMeta}>{analyzedUrl} · {analyzedAt} · {analyzedCategory}</p>
+                  <p className={styles.resultsMeta}>{analyzedUrl} · {analyzedAt}{analyzedSector ? ` · ${analyzedSector}` : ''} · {analyzedCategory}</p>
                   {fromCache && (
                     <span className={styles.cacheTag}>
                       Cached · <button className={styles.refreshLink} onClick={refreshAnalysis}>Refresh</button>
@@ -503,27 +541,41 @@ export default function Home() {
                     ))}
                 </div>
 
-                {/* Word cloud */}
                 {(brief.keywords || []).length > 0 && (
                   <div className={styles.sectionCard}>
                     <div className={styles.sectionHead}>
                       <span className={styles.sectionLabel}>Signal keywords</span>
                       <span className={styles.sectionSubLabel}>size = frequency · colour = sentiment</span>
                     </div>
-                    <div className={styles.wordCloud}>
-                      {brief.keywords.map((kw, i) => (
-                        <span
-                          key={i}
-                          className={styles.keyword}
-                          style={{
-                            fontSize: keywordSize(kw.weight),
-                            color: keywordColor(kw.direction),
-                            opacity: keywordOpacity(kw.weight),
-                          }}
+                    <div className={styles.filterRow}>
+                      {(['all', 'pos', 'neg'] as const).map(f => (
+                        <button
+                          key={f}
+                          className={`${styles.filterBtn} ${keywordFilter === f ? styles.filterBtnActive : ''} ${f === 'pos' ? styles.filterBtnPos : f === 'neg' ? styles.filterBtnNeg : ''}`}
+                          onClick={() => setKeywordFilter(f)}
                         >
-                          {kw.word}
-                        </span>
+                          {f === 'all' ? 'All' : f === 'pos' ? '● Positive' : '● Negative'}
+                        </button>
                       ))}
+                    </div>
+                    <div className={styles.wordCloud}>
+                      {brief.keywords.map((kw, i) => {
+                        const isActive = keywordFilter === 'all' || kw.direction === keywordFilter
+                        return (
+                          <span
+                            key={i}
+                            className={styles.keyword}
+                            style={{
+                              fontSize: keywordSize(kw.weight),
+                              color: keywordColor(kw.direction),
+                              opacity: isActive ? keywordOpacity(kw.weight) : 0.1,
+                              transition: 'opacity 0.2s ease',
+                            }}
+                          >
+                            {kw.word}
+                          </span>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
