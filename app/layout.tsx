@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Parrot — competitive intelligence',
-  description: 'See what your competitors are doing before you notice it yourself.',
+  title: 'Parrot — market signal',
+  description: 'See what the market thinks about any brand before you make your next move.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
