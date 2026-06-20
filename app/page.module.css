@@ -673,3 +673,112 @@
 @media (prefers-color-scheme: dark) {
   .filterBtnPos.filterBtnActive { color: #8bc34a; }
 }
+
+/* Collapsible context */
+.contextToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  margin-top: 0.75rem;
+  background: none;
+  border: none;
+  border-top: 0.5px solid var(--border);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.contextToggle:hover { color: var(--text-primary); opacity: 0.8; }
+
+.contextToggleHint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.contextFields {
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Insight panel */
+.insightCard {
+  margin-top: 12px;
+  background: var(--bg-card);
+  border: 0.5px solid rgba(99, 153, 34, 0.3);
+  border-left: 3px solid #639922;
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .insightCard {
+    border-color: rgba(99, 153, 34, 0.2);
+    border-left-color: #8bc34a;
+  }
+}
+
+.insightHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.insightTitle {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.insightModel {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+  border: 0.5px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+
+.insightGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .insightGrid { grid-template-columns: 1fr; }
+}
+
+.insightItem {
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.insightItemLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: #639922;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 5px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .insightItemLabel { color: #8bc34a; }
+}
+
+.insightItemBody {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
