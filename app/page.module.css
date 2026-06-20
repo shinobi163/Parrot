@@ -782,3 +782,122 @@
   color: var(--text-secondary);
   line-height: 1.6;
 }
+
+/* Compare section */
+.compareSection {
+  margin-top: 12px;
+  background: var(--bg-card);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+}
+
+.compareToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 0;
+}
+
+.compareToggle:hover { opacity: 0.8; }
+
+.compareFields {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compareBrandRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compareBrandInputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  flex: 1;
+}
+
+.removeBtn {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: none;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.removeBtn:hover { color: var(--red); border-color: var(--red); }
+
+.addBrandBtn {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: none;
+  border: 0.5px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.addBrandBtn:hover { border-color: var(--border-strong); color: var(--text-primary); }
+
+.compareHint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 6px 0;
+}
+
+/* Comparison results */
+.comparisonResults {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.comparisonGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .comparisonGrid { grid-template-columns: 1fr; }
+  .compareBrandInputs { grid-template-columns: 1fr; }
+}
+
+.brandCompareGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.brandCompareItem {
+  padding: 8px 0;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.brandCompareItem:last-child { border-bottom: none; padding-bottom: 0; }
+
+.brandCompareLabel {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
