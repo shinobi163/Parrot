@@ -202,6 +202,7 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [copied, setCopied] = useState(false)
   const [keywordFilter, setKeywordFilter] = useState<'all' | 'pos' | 'neg'>('all')
+  const [activeTab, setActiveTab] = useState<'signal' | 'compare'>('signal')
 
   // Comparison state
   const [compareOpen, setCompareOpen] = useState(false)
@@ -316,7 +317,7 @@ export default function Home() {
     setScreen('input'); setError(''); setActiveStep(-1)
     setDoneSteps([]); setSidebarOpen(false); setCopied(false)
     setComparison(null); setCompareOpen(false)
-    setCompareBrands([{ name: '', url: '' }])
+    setCompareBrands([{ name: '', url: '' }]); setActiveTab('signal')
   }
 
   function refreshAnalysis() {
@@ -580,6 +581,25 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Tabs */}
+            <div className={styles.tabBar}>
+              <button
+                className={`${styles.tab} ${activeTab === 'signal' ? styles.tabActive : ''}`}
+                onClick={() => setActiveTab('signal')}
+              >
+                Market signal
+              </button>
+              <button
+                className={`${styles.tab} ${activeTab === 'compare' ? styles.tabActive : ''}`}
+                onClick={() => setActiveTab('compare')}
+              >
+                Compare brands
+                {comparison && <span className={styles.tabBadge}>✓</span>}
+              </button>
+            </div>
+
+            {activeTab === 'signal' && (
+            <div>
             <div className={styles.panelGrid}>
               <div className={styles.panelLeft}>
                 <div className={styles.sectionCard}>
@@ -691,16 +711,16 @@ export default function Home() {
                 </div>
               </div>
             )}
+            </div>
+            )}
 
-            {/* Compare section */}
-            <div className={styles.compareSection}>
-              <button className={styles.compareToggle} onClick={() => setCompareOpen(o => !o)}>
-                <span>{compareOpen ? '▾' : '▸'} Compare with other brands</span>
-                <span className={styles.contextToggleHint}>same sector · up to 2 more brands</span>
-              </button>
+            {/* Compare tab */}
+            {activeTab === 'compare' && (
+            <div className={styles.compareTab}>
+              <div className={styles.compareFields}>
+                <p className={styles.compareTabHint}>Add 1-2 brands from the same sector and category to compare against <strong>{analyzedName}</strong>.</p>
 
-              {compareOpen && (
-                <div className={styles.compareFields}>
+              <div>
                   {compareBrands.map((brand, i) => (
                     <div key={i} className={styles.compareBrandRow}>
                       <div className={styles.compareBrandInputs}>
@@ -729,7 +749,6 @@ export default function Home() {
 
                   {compareError && <p className={styles.error}>{compareError}</p>}
                 </div>
-              )}
 
               {/* Comparison results */}
               {comparison && (
@@ -786,6 +805,7 @@ export default function Home() {
                 </div>
               )}
             </div>
+            )}
 
             <div className={styles.footer}>
               <p className={styles.footerText}>Sentiment and signals reflect publicly available user opinions and community discussions — not the views of Parrot or its creators.</p>
