@@ -11,14 +11,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 })
   }
 
-  const prompt = `You are a competitive intelligence analyst. Research the competitor below and return a JSON object ONLY — no preamble, no markdown fences, no explanation.
+  const prompt = `You are a market analyst. Research the brand below and return a JSON object ONLY — no preamble, no markdown fences, no explanation.
 
-Competitor: ${name}
+Brand: ${name}
 Website: ${url}
 Sector: ${sector}
 Category: ${category}
 
-Frame your entire analysis through the lens of a ${category} company within the ${sector} sector. This determines which competitors, communities, and review sources are relevant.
+Frame your entire analysis through the lens of a ${category} brand within the ${sector} sector. This determines which peer brands, communities, and review sources are relevant.
 
 Run a maximum of 4 web searches total. Use these searches:
 1. "${name} new feature launch 2025"
