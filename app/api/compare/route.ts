@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { logError } from '@/lib/logError'
 
 function stripCitations(text: string): string {
   return text.replace(/<cite[^>]*>|<\/cite>/g, '').trim()
@@ -17,7 +18,7 @@ interface BriefInput {
   sector: string
   category: string
   timeRange: string
-  cachedBrief?: object
+  cachedBrief?: object | null
 }
 
 async function fetchBrief(brand: BriefInput) {
@@ -87,26 +88,37 @@ Rules:
 }
 
 export async function POST(req: NextRequest) {
-  const { brands } = await req.json()
+  const { brands, userContext } = await req.json()
 
   if (!brands || brands.length < 2 || brands.length > 3) {
     return NextResponse.json({ error: 'Provide 2-3 brands to compare.' }, { status: 400 })
   }
 
+  const hasUserContext = !!(userContext?.idea || userContext?.audience || userContext?.edge)
+
   try {
-    // Fetch briefs for brands that don't have a cached one
     const briefs = await Promise.all(
       brands.map(async (brand: BriefInput) => {
         if (brand.cachedBrief) return { name: brand.name, brief: brand.cachedBrief }
-        const brief = await fetchBrief(brand)
-        return { name: brand.name, brief }
+        try {
+          const brief = await fetchBrief(brand)
+          return { name: brand.name, brief }
+        } catch (err) {
+          await logError('/api/compare/fetch', err, brand.name)
+          throw err
+        }
       })
     )
 
-    // Synthesis call — no web search, reasoning over briefs only
+    // Build synthesis prompt — different if user context present
+    const userIdea = hasUserContext
+      ? `\n\nIMPORTANT: The user is building something. Evaluate each brand specifically in relation to their idea.\n- What they're building: ${userContext.idea || 'Not specified'}\n- Who it's for: ${userContext.audience || 'Not specified'}\n- Their edge: ${userContext.edge || 'Not specified'}\n\nAdd a fourth entry in the "brands" array called "Your Idea" that represents the user's product concept. Evaluate it honestly against the real brands — where it overlaps, where it has an edge, and what it's missing. Use the same card format as the other brands.`
+      : ''
+
     const synthPrompt = `You are a market analyst. Compare the following brands based on their market signal data and return a JSON object ONLY.
 
 ${briefs.map(b => `${b.name}:\n${JSON.stringify(b.brief)}`).join('\n\n')}
+${userIdea}
 
 Return exactly this JSON structure:
 {
@@ -128,9 +140,10 @@ Return exactly this JSON structure:
 
 Rules:
 - sharedStrengths: 2-3 items that appear positively across multiple brands
-- sharedWeaknesses: 2-3 complaints that appear across multiple brands — this is the unresolved category gap
-- brands: one entry per brand, in the same order as input
-- Stay grounded in the signal data provided. Do not invent.
+- sharedWeaknesses: 2-3 complaints that appear across multiple brands — the unresolved category gap
+- brands: one entry per brand in input order${hasUserContext ? ', plus one entry for "Your Idea" at the end' : ''}
+- For "Your Idea" entry: topPositive = stated edge, topNegative = gaps vs existing players, unique = what differentiates the concept
+- Stay grounded in the signal data. Do not invent.
 - Do not include citation tags or markup
 - Return valid JSON only, nothing else`
 
@@ -147,19 +160,34 @@ Rules:
     )
 
     const synthData = await synthResponse.json()
-    const synthRaw = synthData.candidates?.[0]?.content?.parts?.[0]?.text
 
-    if (!synthRaw) throw new Error('No synthesis response')
+    if (!synthResponse.ok) {
+      const errMsg = synthData.error?.message || 'Synthesis failed'
+      await logError('/api/compare/synthesis', errMsg)
+      return NextResponse.json({ error: errMsg }, { status: 500 })
+    }
+
+    const synthRaw = synthData.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!synthRaw) {
+      await logError('/api/compare/synthesis', 'No synthesis response')
+      return NextResponse.json({ error: 'No synthesis response' }, { status: 500 })
+    }
 
     const synthMatch = synthRaw.replace(/```json|```/g, '').trim().match(/\{[\s\S]*\}/)
-    if (!synthMatch) throw new Error('No JSON in synthesis')
+    if (!synthMatch) {
+      await logError('/api/compare/synthesis', 'No JSON in synthesis response')
+      return NextResponse.json({ error: 'Could not parse comparison.' }, { status: 500 })
+    }
 
     const comparison = JSON.parse(synthMatch[0])
+    const fetchedBriefs = briefs.filter((b: { name: string; brief: object }) =>
+      !brands.find((brand: BriefInput) => brand.name === b.name && brand.cachedBrief)
+    )
 
-    return NextResponse.json({ comparison, fetchedBriefs: briefs.filter((b: { name: string; brief: object }) => !brands.find((brand: BriefInput) => brand.name === b.name && brand.cachedBrief)) })
+    return NextResponse.json({ comparison, fetchedBriefs })
 
   } catch (err) {
-    console.error('Compare error:', err)
+    await logError('/api/compare', err)
     return NextResponse.json({ error: 'Comparison failed. Try again.' }, { status: 500 })
   }
 }
