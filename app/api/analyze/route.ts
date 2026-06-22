@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { logError } from '@/lib/logError'
 
 function stripCitations(text: string): string {
   return text.replace(/<cite[^>]*>|<\/cite>/g, '').trim()
@@ -13,6 +14,9 @@ const TIME_RANGE_LABELS: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   const { name, url, sector, category, timeRange, userContext } = await req.json()
+  const { headers } = req
+  const userAgent = headers.get('user-agent') || ''
+  const userHash = Buffer.from(userAgent).toString('base64').slice(0, 32)
 
   if (!name || !url || !sector || !category) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 })
@@ -59,7 +63,7 @@ Rules:
 - score means SATISFACTION level: high (70-100) = users happy, low (0-30) = users unhappy, mid (40-60) = mixed
 - direction: pos = users praise this, neg = users complain about this, neu = mixed or neutral
 - summary: one plain sentence e.g. "Users love the speed and simplicity" or "Frequent complaints about pricing"
-- keywords: 12-18 words extracted from community discussions and review sentiment only. weight = frequency/strength (1=rarely, 10=very frequently). direction = sentiment toward that keyword
+- keywords: 12-18 words extracted from community discussions and review sentiment only. weight = frequency/strength (1=rarely, 10=very frequently)
 - url: actual URL if found, otherwise empty string ""
 - Do not include any citation tags or markup in string values
 - If you cannot find real data for a field, omit that item rather than fabricate
@@ -82,19 +86,20 @@ Rules:
     const geminiData = await geminiResponse.json()
 
     if (!geminiResponse.ok) {
-      console.error('Gemini error:', geminiData)
-      return NextResponse.json({ error: geminiData.error?.message || 'Gemini API error' }, { status: 500 })
+      const errMsg = geminiData.error?.message || 'Gemini API error'
+      await logError('/api/analyze', errMsg, name, userHash)
+      return NextResponse.json({ error: errMsg }, { status: 500 })
     }
 
     const raw = geminiData.candidates?.[0]?.content?.parts?.[0]?.text
     if (!raw) {
-      console.error('No text in Gemini response:', JSON.stringify(geminiData))
+      await logError('/api/analyze', 'No text in Gemini response', name, userHash)
       return NextResponse.json({ error: 'No text response from model.' }, { status: 500 })
     }
 
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      console.error('No JSON found in response:', raw)
+      await logError('/api/analyze', 'No JSON found in Gemini response', name, userHash)
       return NextResponse.json({ error: 'Could not parse response.' }, { status: 500 })
     }
 
@@ -121,7 +126,7 @@ Rules:
       }))
     }
 
-    // Insight call — Gemini, no web search, reasoning over existing data only
+    // Insight call
     if (userContext?.idea || userContext?.audience || userContext?.edge) {
       const insightPrompt = `You are a sharp market analyst helping a founder or PM understand what a brand's market signal means for their specific idea.
 
@@ -165,44 +170,28 @@ Rules:
             })
           }
         )
-
         const insightData = await insightResponse.json()
         const insightRaw = insightData.candidates?.[0]?.content?.parts?.[0]?.text
-
         if (insightRaw) {
           const insightMatch = insightRaw.replace(/```json|```/g, '').trim().match(/\{[\s\S]*\}/)
-          if (insightMatch) {
-            parsed.insight = JSON.parse(insightMatch[0])
-          }
+          if (insightMatch) parsed.insight = JSON.parse(insightMatch[0])
         }
       } catch (insightErr) {
-        console.error('Insight call failed (non-fatal):', insightErr)
+        await logError('/api/analyze/insight', insightErr, name, userHash)
       }
     }
 
-    // Fire-and-forget log call — non-fatal
-    const { headers } = req
-    const userAgent = headers.get('user-agent') || ''
-    const userHash = Buffer.from(userAgent).toString('base64').slice(0, 32)
-
+    // Fire-and-forget log
     fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'https://parrot-kappa-inky.vercel.app'}/api/log`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        brandName: name,
-        brandUrl: url,
-        sector,
-        category,
-        timeRange,
-        brief: parsed,
-        userHash,
-      }),
-    }).catch(err => console.error('Log fire-and-forget failed:', err))
+      body: JSON.stringify({ brandName: name, brandUrl: url, sector, category, timeRange, brief: parsed, userHash }),
+    }).catch(err => logError('/api/log', err, name, userHash))
 
     return NextResponse.json(parsed)
 
   } catch (err) {
-    console.error('Server error:', err)
+    await logError('/api/analyze', err, name, userHash)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 }
