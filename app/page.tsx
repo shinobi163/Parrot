@@ -8,7 +8,7 @@ const STORAGE_KEY = 'parrot_usage'
 const HISTORY_KEY = 'parrot_history'
 const MAX_HISTORY = 5
 const CACHE_MAX_AGE_DAYS = 30
-const BYPASS_RATE_LIMIT = false // set to true to disable limit during testing
+const BYPASS_RATE_LIMIT = true // set to true to disable limit during testing
 
 type Direction = 'pos' | 'neg' | 'neu'
 
