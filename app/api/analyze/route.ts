@@ -180,6 +180,25 @@ Rules:
       }
     }
 
+    // Fire-and-forget log call — non-fatal
+    const { headers } = req
+    const userAgent = headers.get('user-agent') || ''
+    const userHash = Buffer.from(userAgent).toString('base64').slice(0, 32)
+
+    fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'https://parrot-kappa-inky.vercel.app'}/api/log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brandName: name,
+        brandUrl: url,
+        sector,
+        category,
+        timeRange,
+        brief: parsed,
+        userHash,
+      }),
+    }).catch(err => console.error('Log fire-and-forget failed:', err))
+
     return NextResponse.json(parsed)
 
   } catch (err) {
