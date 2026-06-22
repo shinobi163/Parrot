@@ -8,6 +8,7 @@ const STORAGE_KEY = 'parrot_usage'
 const HISTORY_KEY = 'parrot_history'
 const MAX_HISTORY = 5
 const CACHE_MAX_AGE_DAYS = 30
+const BYPASS_RATE_LIMIT = false // set to true to disable limit during testing
 
 type Direction = 'pos' | 'neg' | 'neu'
 
@@ -229,7 +230,7 @@ export default function Home() {
     }
 
     const usage = getUsage()
-    if (usage.count >= DAILY_LIMIT) return
+    if (!BYPASS_RATE_LIMIT && usage.count >= DAILY_LIMIT) return
 
     setAnalyzedName(name.trim())
     setAnalyzedUrl(url.trim())
@@ -263,8 +264,8 @@ export default function Home() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Analysis failed.')
       const newCount = usage.count + 1
-      saveUsage(newCount)
-      setRemaining(Math.max(0, DAILY_LIMIT - newCount))
+      if (!BYPASS_RATE_LIMIT) saveUsage(newCount)
+      setRemaining(BYPASS_RATE_LIMIT ? DAILY_LIMIT : Math.max(0, DAILY_LIMIT - newCount))
       const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
       const entry: HistoryEntry = { name: name.trim(), url: url.trim(), sector, category, timeRange, date: dateStr, timestamp: Date.now(), brief: data }
       setHistory(saveToHistory(entry))
@@ -299,15 +300,50 @@ export default function Home() {
     setActiveTab('signal'); setCompareBrands([{ name: '', url: '' }])
   }
 
-  function refreshAnalysis() {
+  async function refreshAnalysis() {
+    // Clear from cache
     const h = getHistory().filter(h => h.name.toLowerCase() !== analyzedName.toLowerCase())
     localStorage.setItem(HISTORY_KEY, JSON.stringify(h))
     setHistory(h)
+    // Pre-fill state and re-run directly
     setName(analyzedName); setUrl(analyzedUrl)
     setSector(analyzedSector); setCategory(analyzedCategory)
     setTimeRange(analyzedTimeRange)
-    setScreen('input'); setFromCache(false); setCopied(false)
+    setFromCache(false); setCopied(false)
     setComparison(null); setActiveTab('signal')
+    setScreen('loading')
+    setActiveStep(0); setDoneSteps([])
+    let step = 0
+    const interval = setInterval(() => {
+      setDoneSteps(prev => step > 0 ? [...prev, step - 1] : prev)
+      step++
+      if (step < STEPS.length) { setActiveStep(step) } else { clearInterval(interval) }
+    }, 900)
+    try {
+      const usage = getUsage()
+      const userContext = hasContext ? { idea: idea.trim(), audience: audience.trim(), edge: edge.trim() } : null
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: analyzedName, url: analyzedUrl, sector: analyzedSector, category: analyzedCategory, timeRange: analyzedTimeRange, userContext }),
+      })
+      clearInterval(interval)
+      setDoneSteps(STEPS.map((_, i) => i)); setActiveStep(-1)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Analysis failed.')
+      const newCount = usage.count + 1
+      if (!BYPASS_RATE_LIMIT) saveUsage(newCount)
+      setRemaining(BYPASS_RATE_LIMIT ? DAILY_LIMIT : Math.max(0, DAILY_LIMIT - newCount))
+      const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      const entry: HistoryEntry = { name: analyzedName, url: analyzedUrl, sector: analyzedSector, category: analyzedCategory, timeRange: analyzedTimeRange, date: dateStr, timestamp: Date.now(), brief: data }
+      setHistory(saveToHistory(entry))
+      setBrief(data); setAnalyzedAt(dateStr)
+      setScreen('results')
+    } catch (e: unknown) {
+      clearInterval(interval)
+      setScreen('results')
+      setFromCache(false)
+    }
   }
 
   async function copyBrief() {
@@ -343,7 +379,7 @@ export default function Home() {
       const res = await fetch('/api/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brands }),
+        body: JSON.stringify({ brands, userContext: hasContext ? { idea: idea.trim(), audience: audience.trim(), edge: edge.trim() } : null }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Comparison failed.')
