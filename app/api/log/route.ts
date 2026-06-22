@@ -3,22 +3,21 @@ import { NextRequest, NextResponse } from 'next/server'
 const SUPABASE_URL = process.env.SUPABASE_URL!
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY!
 
-async function supabase(path: string, method: string, body?: object) {
+async function db(path: string, method: string, body?: object, extra?: Record<string, string>) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       'apikey': SUPABASE_KEY,
       'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Prefer': method === 'POST' ? 'return=representation' : '',
+      'Prefer': 'return=representation',
+      ...extra,
     },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`Supabase error: ${err}`)
-  }
-  return res.json().catch(() => null)
+  const text = await res.text()
+  if (!res.ok) throw new Error(`Supabase ${method} ${path} failed: ${text}`)
+  try { return JSON.parse(text) } catch { return null }
 }
 
 export async function POST(req: NextRequest) {
@@ -31,58 +30,60 @@ export async function POST(req: NextRequest) {
 
     const hasInsight = !!(brief.insight?.overlap)
 
-    // Upsert brand — insert if new, update last_analyzed and increment count if exists
-    const brandResult = await supabase(
-      '/brands?on_conflict=name',
-      'POST',
-      {
+    // Step 1: Check if brand exists
+    const existing = await db(
+      `/brands?name=ilike.${encodeURIComponent(brandName)}&select=id,analysis_count`,
+      'GET'
+    )
+
+    let brandId: string | null = null
+
+    if (existing && existing.length > 0) {
+      // Brand exists — update it
+      brandId = existing[0].id
+      await db(
+        `/brands?id=eq.${brandId}`,
+        'PATCH',
+        {
+          url: brandUrl || '',
+          sector: sector || '',
+          category: category || '',
+          last_analyzed: new Date().toISOString(),
+          analysis_count: (existing[0].analysis_count || 1) + 1,
+          updated_at: new Date().toISOString(),
+        }
+      )
+    } else {
+      // Brand does not exist — insert it
+      const inserted = await db('/brands', 'POST', {
         name: brandName,
         url: brandUrl || '',
         sector: sector || '',
         category: category || '',
+        first_seen: new Date().toISOString(),
         last_analyzed: new Date().toISOString(),
         analysis_count: 1,
-      }
-    ).catch(async () => {
-      // Brand already exists — update it
-      await supabase(
-        `/brands?name=eq.${encodeURIComponent(brandName)}`,
-        'PATCH',
-        {
-          last_analyzed: new Date().toISOString(),
-          url: brandUrl || '',
-          sector: sector || '',
-          category: category || '',
-        }
-      )
-      // Increment count separately
-      await fetch(`${SUPABASE_URL}/rest/v1/rpc/increment_analysis_count`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-        },
-        body: JSON.stringify({ brand_name: brandName }),
       })
-      // Fetch brand id
-      const brands = await supabase(`/brands?name=eq.${encodeURIComponent(brandName)}&select=id`, 'GET')
-      return brands?.[0] || null
-    })
-
-    const brandId = Array.isArray(brandResult) ? brandResult[0]?.id : brandResult?.id
-
-    // Upsert user hash
-    if (userHash) {
-      await supabase('/users?on_conflict=user_hash', 'POST', {
-        user_hash: userHash,
-        plan: 'free',
-      }).catch(() => null) // Ignore if already exists
+      brandId = inserted?.[0]?.id || null
     }
 
-    // Insert analysis
-    await supabase('/analyses', 'POST', {
-      brand_id: brandId || null,
+    // Step 2: Upsert user hash if provided
+    if (userHash) {
+      const existingUser = await db(
+        `/users?user_hash=eq.${encodeURIComponent(userHash)}&select=id`,
+        'GET'
+      )
+      if (!existingUser || existingUser.length === 0) {
+        await db('/users', 'POST', {
+          user_hash: userHash,
+          plan: 'free',
+        }).catch(() => null)
+      }
+    }
+
+    // Step 3: Insert analysis — always
+    await db('/analyses', 'POST', {
+      brand_id: brandId,
       brand_name: brandName,
       brand_url: brandUrl || '',
       sector: sector || '',
@@ -96,7 +97,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true })
 
   } catch (err) {
-    // Non-fatal — log errors but don't break the user experience
     console.error('Log error:', err)
     return NextResponse.json({ error: 'Logging failed.' }, { status: 500 })
   }
