@@ -1,5 +1,5 @@
 {
-  "name": "parrot",
+  "name": "candor",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,7 +10,8 @@
   "dependencies": {
     "next": "latest",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "@supabase/supabase-js": "^2"
   },
   "devDependencies": {
     "@types/node": "^20",

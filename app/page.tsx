@@ -151,7 +151,7 @@ export default function Home() {
           <p style={styles.tagline}>Are your roadmap assumptions still valid?</p>
         </div>
 
-        {/* Input form — hidden once assumption is saved */}
+        {/* Input form */}
         {!assumption && (
           <div style={styles.form}>
             <div style={styles.field}>
@@ -161,6 +161,7 @@ export default function Home() {
                 placeholder="e.g. Quick commerce has not penetrated beyond Tier 1 cities in India"
                 value={belief}
                 onChange={e => setBelief(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
                 rows={3}
               />
             </div>
@@ -172,6 +173,7 @@ export default function Home() {
                 placeholder="e.g. Our decision to focus the first version on metro cities only"
                 value={decisionDriver}
                 onChange={e => setDecisionDriver(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
                 rows={2}
               />
             </div>
@@ -183,25 +185,28 @@ export default function Home() {
                 placeholder="e.g. Quick commerce, India"
                 value={market}
                 onChange={e => setMarket(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
               />
             </div>
 
             <div style={styles.field}>
               <label style={styles.label}>
                 I&apos;m watching
-                <span style={styles.optional}> — optional, comma separated</span>
+                <span style={styles.optional}> - optional, comma separated</span>
               </label>
               <input
                 style={styles.input}
                 placeholder="e.g. Zepto, Blinkit, Swiggy Instamart"
                 value={competitors}
                 onChange={e => setCompetitors(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
               />
             </div>
 
             {error && <p style={styles.error}>{error}</p>}
 
             <button
+              type="button"
               style={loading ? { ...styles.button, opacity: 0.6 } : styles.button}
               onClick={handleSubmit}
               disabled={loading}
@@ -211,7 +216,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Assumption saved — show summary + Check Now */}
+        {/* Assumption saved - show summary + Check Now */}
         {assumption && !evaluation && (
           <div style={styles.savedCard}>
             <p style={styles.savedLabel}>Assumption saved</p>
@@ -219,12 +224,13 @@ export default function Home() {
             <p style={styles.savedMeta}>
               {assumption.raw_market_input}
               {assumption.raw_competitors?.length > 0 &&
-                ` · watching ${assumption.raw_competitors.join(', ')}`}
+                ` - watching ${assumption.raw_competitors.join(', ')}`}
             </p>
 
             {error && <p style={styles.error}>{error}</p>}
 
             <button
+              type="button"
               style={evaluating ? { ...styles.button, opacity: 0.6 } : styles.button}
               onClick={handleEvaluate}
               disabled={evaluating}
@@ -232,7 +238,11 @@ export default function Home() {
               {evaluating ? 'Checking...' : 'Check now'}
             </button>
 
-            <button style={styles.ghost} onClick={handleReset}>
+            <button
+              type="button"
+              style={styles.ghost}
+              onClick={handleReset}
+            >
               Start over
             </button>
           </div>
@@ -302,7 +312,11 @@ export default function Home() {
               </p>
             </div>
 
-            <button style={styles.ghost} onClick={handleReset}>
+            <button
+              type="button"
+              style={styles.ghost}
+              onClick={handleReset}
+            >
               Check another assumption
             </button>
           </div>
