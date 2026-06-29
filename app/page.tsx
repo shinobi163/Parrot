@@ -1,829 +1,557 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import styles from './page.module.css'
+import { useState } from 'react'
 
-const DAILY_LIMIT = 3
-const STORAGE_KEY = 'parrot_usage'
-const HISTORY_KEY = 'parrot_history'
-const MAX_HISTORY = 5
-const CACHE_MAX_AGE_DAYS = 30
-const BYPASS_RATE_LIMIT = true // set to true to disable limit during testing
-
-type Direction = 'pos' | 'neg' | 'neu'
-
-interface ActivityItem { title: string; body: string; source: string; url: string }
-interface CommunityItem { title: string; body: string; source: string; url: string }
-interface SentimentItem { label: string; score: number; direction: Direction; summary: string }
-interface KeywordItem { word: string; weight: number; direction: Direction }
-interface Insight { overlap: string; weakness: string; gap: string; watch: string }
-interface Brief {
-  activity: ActivityItem[]
-  community: CommunityItem[]
-  sentiment: SentimentItem[]
-  keywords: KeywordItem[]
-  insight?: Insight
-}
-interface HistoryEntry {
-  name: string; url: string; sector: string; category: string
-  timeRange: string; date: string; timestamp: number; brief: Brief
-}
-interface ComparisonBrand { name: string; url: string }
-interface ComparisonStrength { theme: string; description: string }
-interface ComparisonBrandResult { name: string; unique: string; topPositive: string; topNegative: string }
-interface Comparison {
-  sharedStrengths: ComparisonStrength[]
-  sharedWeaknesses: ComparisonStrength[]
-  brands: ComparisonBrandResult[]
+type EvidenceItem = {
+  source: string
+  date: string
+  what_happened: string
+  why_it_matters: string
 }
 
-function getToday() { return new Date().toISOString().slice(0, 10) }
-
-function getUsage(): { date: string; count: number } {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { date: getToday(), count: 0 }
-    const data = JSON.parse(raw)
-    if (data.date !== getToday()) return { date: getToday(), count: 0 }
-    return data
-  } catch { return { date: getToday(), count: 0 } }
+type ComponentItem = {
+  component: string
+  status: 'holding' | 'weakening' | 'broken'
+  note: string
 }
 
-function saveUsage(count: number) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ date: getToday(), count }))
-}
-
-function getHistory(): HistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
-}
-
-function saveToHistory(entry: HistoryEntry) {
-  const history = getHistory()
-  const filtered = history.filter(h => h.name.toLowerCase() !== entry.name.toLowerCase())
-  const updated = [entry, ...filtered].slice(0, MAX_HISTORY)
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(updated))
-  return updated
-}
-
-function getCached(name: string): HistoryEntry | null {
-  const history = getHistory()
-  const entry = history.find(h => h.name.toLowerCase() === name.toLowerCase())
-  if (!entry) return null
-  const ageDays = (Date.now() - (entry.timestamp || 0)) / (1000 * 60 * 60 * 24)
-  if (ageDays > CACHE_MAX_AGE_DAYS) return null
-  return entry
-}
-
-function scoreToBarClass(score: number, s: Record<string, string>): string {
-  if (score >= 65) return s.barPos
-  if (score <= 35) return s.barNeg
-  return s.barNeu
-}
-
-function scoreToDotClass(score: number, s: Record<string, string>): string {
-  if (score >= 65) return s.dotPos
-  if (score <= 35) return s.dotNeg
-  return s.dotNeu
-}
-
-function keywordColor(direction: Direction): string {
-  if (direction === 'pos') return '#639922'
-  if (direction === 'neg') return '#e24b4a'
-  return '#888780'
-}
-
-function keywordOpacity(weight: number): number { return 0.4 + (weight / 10) * 0.6 }
-function keywordSize(weight: number): string { return `${Math.round(11 + (weight / 10) * 11)}px` }
-
-function formatBriefAsText(name: string, url: string, sector: string, category: string, timeRange: string, date: string, brief: Brief): string {
-  const timeLabels: Record<string, string> = { '30d': 'Last 30 days', '6m': 'Last 6 months', '12m': 'Last 12 months', 'all': 'All time' }
-  const lines: string[] = [
-    'PARROT — Market Signal',
-    `${name} · ${url} · ${sector} / ${category} · ${timeLabels[timeRange] || '6 months'} · ${date}`,
-    '', 'RECENT ACTIVITY', '---------------',
-  ]
-  for (const item of brief.activity || []) {
-    lines.push(item.title, item.body, `Source: ${item.source}${item.url ? ' — ' + item.url : ''}`, '')
+type Synthesis = {
+  verdict_line: string
+  evidence: EvidenceItem[]
+  component_breakdown: ComponentItem[]
+  next_action: {
+    text: string
+    action_type: string
   }
-  lines.push('COMMUNITY SIGNAL', '----------------')
-  for (const item of brief.community || []) {
-    lines.push(item.title, item.body, `Source: ${item.source}${item.url ? ' — ' + item.url : ''}`, '')
-  }
-  lines.push('MARKET SENTIMENT', '----------------')
-  for (const item of brief.sentiment || []) {
-    const label = item.score >= 65 ? 'Positive' : item.score <= 35 ? 'Negative' : 'Mixed'
-    lines.push(`${item.label} — ${Math.round(item.score)}/100 (${label})`)
-    if (item.summary) lines.push(item.summary)
-    lines.push('')
-  }
-  if (brief.insight) {
-    lines.push('WHAT THIS MEANS FOR YOU', '-----------------------',
-      'Where they overlap: ' + brief.insight.overlap, '',
-      'Where they are weak: ' + brief.insight.weakness, '',
-      'The gap: ' + brief.insight.gap, '',
-      'What to watch: ' + brief.insight.watch, '')
-  }
-  lines.push('---', 'Generated by Parrot. AI-generated — verify before use.')
-  return lines.join('\n')
 }
 
-const SECTOR_MAP: Record<string, string[]> = {
-  'Consumer & Retail': ['E-Commerce', 'D2C Brands', 'Hyperlocal', 'Grocery', 'Fashion & Apparel', 'Beauty & Personal Care', 'Electronics & Gadgets'],
-  'Fintech & Payments': ['Payments & Wallets', 'Neo-Banking', 'Lending & BNPL', 'Insurance', 'Wealth & Investing', 'Crypto'],
-  'Food & Beverage': ['Food Delivery', 'Cloud Kitchens', 'QSR Chains', 'Packaged Foods', 'Beverages & D2C Food'],
-  'Logistics & Supply Chain': ['Last-mile Delivery', 'Freight & B2B Logistics', 'Warehousing', 'Cross-border'],
-  'Media & Entertainment': ['Streaming', 'Gaming', 'Short Video', 'Podcasts', 'News & Publishing'],
-  'Health & Wellness': ['Telehealth', 'Fitness & D2C Wellness', 'Mental Health', 'Pharma & MedTech'],
-  'Travel & Hospitality': ['OTAs', 'Hotels & Stays', 'Experiences', 'Corporate Travel'],
-  'B2B & Enterprise SaaS': ['Developer Tools', 'Analytics', 'CRM & Sales', 'Marketing Tech', 'Project Management', 'AI / LLM'],
-  'HR & Workforce': ['Job Portals', 'ATS & Recruiting', 'Payroll & HRMS', 'Gig & Staffing'],
-  'Real Estate & PropTech': ['Residential', 'Commercial', 'Construction Tech', 'Property Management'],
-  'EdTech': ['K-12', 'Higher Ed', 'Upskilling & Courses', 'Language Learning'],
-  'Other': ['Other'],
+type Evaluation = {
+  id: string
+  verdict: 'holding' | 'weakening' | 'broken' | 'dark'
+  synthesis: Synthesis
 }
-const SECTORS = Object.keys(SECTOR_MAP)
-const TIME_RANGES = [
-  { value: '30d', label: 'Last 30 days' },
-  { value: '6m', label: 'Last 6 months' },
-  { value: '12m', label: 'Last 12 months' },
-  { value: 'all', label: 'All time' },
-]
-const STEPS = [
-  'Reading blog and changelog',
-  'Checking Reddit and Hacker News',
-  'Scanning Product Hunt',
-  'Pulling App Store reviews',
-  'Synthesizing brief',
-]
 
-function SourceTag({ source, url, s }: { source: string; url: string; s: Record<string, string> }) {
-  if (url) return <a href={url} target="_blank" rel="noopener noreferrer" className={`${s.sourceTag} ${s.sourceTagLink}`}>{source} ↗</a>
-  return <span className={s.sourceTag}>{source}</span>
+type Assumption = {
+  id: string
+  belief: string
+  decision_driver: string
+  raw_market_input: string
+  raw_competitors: string[]
+}
+
+const VERDICT_COLOR: Record<string, string> = {
+  holding: '#22c55e',
+  weakening: '#f59e0b',
+  broken: '#ef4444',
+  dark: '#6b7280',
+}
+
+const COMPONENT_SYMBOL: Record<string, string> = {
+  holding: '✓',
+  weakening: '~',
+  broken: '✗',
 }
 
 export default function Home() {
-  const [screen, setScreen] = useState<'input' | 'loading' | 'results'>('input')
-  const [name, setName] = useState('')
-  const [url, setUrl] = useState('')
-  const [sector, setSector] = useState('')
-  const [category, setCategory] = useState('')
-  const [timeRange, setTimeRange] = useState('6m')
-  const [contextOpen, setContextOpen] = useState(false)
-  const [idea, setIdea] = useState('')
-  const [audience, setAudience] = useState('')
-  const [edge, setEdge] = useState('')
+  const [belief, setBelief] = useState('')
+  const [decisionDriver, setDecisionDriver] = useState('')
+  const [market, setMarket] = useState('')
+  const [competitors, setCompetitors] = useState('')
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [remaining, setRemaining] = useState(DAILY_LIMIT)
-  const [activeStep, setActiveStep] = useState(-1)
-  const [doneSteps, setDoneSteps] = useState<number[]>([])
-  const [brief, setBrief] = useState<Brief | null>(null)
-  const [analyzedName, setAnalyzedName] = useState('')
-  const [analyzedUrl, setAnalyzedUrl] = useState('')
-  const [analyzedAt, setAnalyzedAt] = useState('')
-  const [analyzedSector, setAnalyzedSector] = useState('')
-  const [analyzedCategory, setAnalyzedCategory] = useState('')
-  const [analyzedTimeRange, setAnalyzedTimeRange] = useState('6m')
-  const [fromCache, setFromCache] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [history, setHistory] = useState<HistoryEntry[]>([])
-  const [copied, setCopied] = useState(false)
-  const [keywordFilter, setKeywordFilter] = useState<'all' | 'pos' | 'neg'>('all')
-  const [activeTab, setActiveTab] = useState<'signal' | 'compare'>('signal')
-  const [compareBrands, setCompareBrands] = useState<ComparisonBrand[]>([{ name: '', url: '' }])
-  const [compareLoading, setCompareLoading] = useState(false)
-  const [compareError, setCompareError] = useState('')
-  const [comparison, setComparison] = useState<Comparison | null>(null)
+  const [assumption, setAssumption] = useState<Assumption | null>(null)
+  const [evaluation, setEvaluation] = useState<Evaluation | null>(null)
+  const [evaluating, setEvaluating] = useState(false)
 
-  useEffect(() => {
-    setRemaining(BYPASS_RATE_LIMIT ? DAILY_LIMIT : Math.max(0, DAILY_LIMIT - getUsage().count))
-    setHistory(getHistory())
-  }, [])
-
-  function handleSectorChange(val: string) { setSector(val); setCategory('') }
-
-  const hasContext = !!(idea.trim() || audience.trim() || edge.trim())
-
-  async function analyze() {
-    setError('')
-    if (!name.trim()) { setError('Enter a brand name to continue.'); return }
-    if (!url.trim()) { setError('Enter the brand website.'); return }
-    if (!sector) { setError('Select a sector.'); return }
-    if (!category) { setError('Select a category.'); return }
-
-    const cached = getCached(name.trim())
-    if (cached) {
-      setBrief(cached.brief)
-      setAnalyzedName(cached.name)
-      setAnalyzedUrl(cached.url)
-      setAnalyzedAt(cached.date)
-      setAnalyzedSector(cached.sector || '')
-      setAnalyzedCategory(cached.category)
-      setAnalyzedTimeRange(cached.timeRange || '6m')
-      setFromCache(true)
-      setComparison(null)
-      setActiveTab('signal')
-      setScreen('results')
+  async function handleSubmit() {
+    if (!belief.trim() || !decisionDriver.trim() || !market.trim()) {
+      setError('Please fill in the first three fields.')
       return
     }
 
-    const usage = getUsage()
-    if (!BYPASS_RATE_LIMIT && usage.count >= DAILY_LIMIT) return
-
-    setAnalyzedName(name.trim())
-    setAnalyzedUrl(url.trim())
-    setAnalyzedSector(sector)
-    setAnalyzedCategory(category)
-    setAnalyzedTimeRange(timeRange)
-    setFromCache(false)
-    setComparison(null)
-    setActiveTab('signal')
-    setScreen('loading')
-    setActiveStep(0)
-    setDoneSteps([])
-
-    let step = 0
-    const interval = setInterval(() => {
-      setDoneSteps(prev => step > 0 ? [...prev, step - 1] : prev)
-      step++
-      if (step < STEPS.length) { setActiveStep(step) } else { clearInterval(interval) }
-    }, 900)
+    setLoading(true)
+    setError('')
+    setEvaluation(null)
 
     try {
-      const userContext = hasContext ? { idea: idea.trim(), audience: audience.trim(), edge: edge.trim() } : null
-      const res = await fetch('/api/analyze', {
+      const res = await fetch('/api/assumptions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), url: url.trim(), sector, category, timeRange, userContext }),
+        body: JSON.stringify({
+          belief: belief.trim(),
+          decision_driver: decisionDriver.trim(),
+          raw_market_input: market.trim(),
+          raw_competitors: competitors
+            .split(',')
+            .map(c => c.trim())
+            .filter(Boolean),
+        }),
       })
-      clearInterval(interval)
-      setDoneSteps(STEPS.map((_, i) => i))
-      setActiveStep(-1)
+
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Analysis failed.')
-      const newCount = usage.count + 1
-      if (!BYPASS_RATE_LIMIT) saveUsage(newCount)
-      setRemaining(BYPASS_RATE_LIMIT ? DAILY_LIMIT : Math.max(0, DAILY_LIMIT - newCount))
-      const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      const entry: HistoryEntry = { name: name.trim(), url: url.trim(), sector, category, timeRange, date: dateStr, timestamp: Date.now(), brief: data }
-      setHistory(saveToHistory(entry))
-      setBrief(data)
-      setAnalyzedAt(dateStr)
-      setScreen('results')
-    } catch (e: unknown) {
-      clearInterval(interval)
-      setScreen('input')
-      setError(e instanceof Error ? e.message : 'Analysis failed. Try again.')
-    }
-  }
 
-  function loadFromHistory(entry: HistoryEntry) {
-    setBrief(entry.brief)
-    setAnalyzedName(entry.name)
-    setAnalyzedUrl(entry.url)
-    setAnalyzedAt(entry.date)
-    setAnalyzedSector(entry.sector || '')
-    setAnalyzedCategory(entry.category)
-    setAnalyzedTimeRange(entry.timeRange || '6m')
-    setFromCache(true)
-    setComparison(null)
-    setActiveTab('signal')
-    setSidebarOpen(false)
-    setScreen('results')
-  }
-
-  function reset() {
-    setScreen('input'); setError(''); setActiveStep(-1); setDoneSteps([])
-    setSidebarOpen(false); setCopied(false); setComparison(null)
-    setActiveTab('signal'); setCompareBrands([{ name: '', url: '' }])
-  }
-
-  async function refreshAnalysis() {
-    // Clear from cache
-    const h = getHistory().filter(h => h.name.toLowerCase() !== analyzedName.toLowerCase())
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(h))
-    setHistory(h)
-    // Pre-fill state and re-run directly
-    setName(analyzedName); setUrl(analyzedUrl)
-    setSector(analyzedSector); setCategory(analyzedCategory)
-    setTimeRange(analyzedTimeRange)
-    setFromCache(false); setCopied(false)
-    setComparison(null); setActiveTab('signal')
-    setScreen('loading')
-    setActiveStep(0); setDoneSteps([])
-    let step = 0
-    const interval = setInterval(() => {
-      setDoneSteps(prev => step > 0 ? [...prev, step - 1] : prev)
-      step++
-      if (step < STEPS.length) { setActiveStep(step) } else { clearInterval(interval) }
-    }, 900)
-    try {
-      const usage = getUsage()
-      const userContext = hasContext ? { idea: idea.trim(), audience: audience.trim(), edge: edge.trim() } : null
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: analyzedName, url: analyzedUrl, sector: analyzedSector, category: analyzedCategory, timeRange: analyzedTimeRange, userContext }),
-      })
-      clearInterval(interval)
-      setDoneSteps(STEPS.map((_, i) => i)); setActiveStep(-1)
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Analysis failed.')
-      const newCount = usage.count + 1
-      if (!BYPASS_RATE_LIMIT) saveUsage(newCount)
-      setRemaining(BYPASS_RATE_LIMIT ? DAILY_LIMIT : Math.max(0, DAILY_LIMIT - newCount))
-      const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      const entry: HistoryEntry = { name: analyzedName, url: analyzedUrl, sector: analyzedSector, category: analyzedCategory, timeRange: analyzedTimeRange, date: dateStr, timestamp: Date.now(), brief: data }
-      setHistory(saveToHistory(entry))
-      setBrief(data); setAnalyzedAt(dateStr)
-      setScreen('results')
-    } catch (e: unknown) {
-      clearInterval(interval)
-      setScreen('results')
-      setFromCache(false)
-    }
-  }
-
-  async function copyBrief() {
-    if (!brief) return
-    const text = formatBriefAsText(analyzedName, analyzedUrl, analyzedSector, analyzedCategory, analyzedTimeRange, analyzedAt, brief)
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch {
-      const el = document.createElement('textarea')
-      el.value = text; document.body.appendChild(el); el.select()
-      document.execCommand('copy'); document.body.removeChild(el)
-    }
-    setCopied(true); setTimeout(() => setCopied(false), 2000)
-  }
-
-  function updateCompareBrand(index: number, field: keyof ComparisonBrand, value: string) {
-    setCompareBrands(prev => prev.map((b, i) => i === index ? { ...b, [field]: value } : b))
-  }
-
-  async function runComparison() {
-    setCompareError('')
-    const validBrands = compareBrands.filter(b => b.name.trim() && b.url.trim())
-    if (validBrands.length === 0) { setCompareError('Add at least one brand to compare.'); return }
-    setCompareLoading(true)
-    const brands = [
-      { name: analyzedName, url: analyzedUrl, sector: analyzedSector, category: analyzedCategory, timeRange: analyzedTimeRange, cachedBrief: brief },
-      ...validBrands.map(b => {
-        const cached = getCached(b.name.trim())
-        return { name: b.name.trim(), url: b.url.trim(), sector: analyzedSector, category: analyzedCategory, timeRange: analyzedTimeRange, cachedBrief: cached?.brief || null }
-      })
-    ]
-    try {
-      const res = await fetch('/api/compare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brands, userContext: hasContext ? { idea: idea.trim(), audience: audience.trim(), edge: edge.trim() } : null }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Comparison failed.')
-      if (data.fetchedBriefs) {
-        const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-        for (const fb of data.fetchedBriefs) {
-          const brand = validBrands.find(b => b.name.trim() === fb.name)
-          if (brand) saveToHistory({ name: fb.name, url: brand.url.trim(), sector: analyzedSector, category: analyzedCategory, timeRange: analyzedTimeRange, date: dateStr, timestamp: Date.now(), brief: fb.brief })
-        }
-        setHistory(getHistory())
+      if (!res.ok) {
+        setError(data.error || 'Something went wrong.')
+        return
       }
-      setComparison(data.comparison)
-    } catch (e: unknown) {
-      setCompareError(e instanceof Error ? e.message : 'Comparison failed.')
+
+      setAssumption(data.assumption)
+    } catch {
+      setError('Network error. Please try again.')
     } finally {
-      setCompareLoading(false)
+      setLoading(false)
     }
   }
 
-  const availableCategories = sector ? SECTOR_MAP[sector] || [] : []
-  const timeLabel = TIME_RANGES.find(t => t.value === analyzedTimeRange)?.label || 'Last 6 months'
+  async function handleEvaluate() {
+    if (!assumption) return
+
+    setEvaluating(true)
+    setError('')
+
+    try {
+      const res = await fetch('/api/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assumption_id: assumption.id }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Evaluation failed.')
+        return
+      }
+
+      setEvaluation(data.evaluation)
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setEvaluating(false)
+    }
+  }
+
+  function handleReset() {
+    setBelief('')
+    setDecisionDriver('')
+    setMarket('')
+    setCompetitors('')
+    setAssumption(null)
+    setEvaluation(null)
+    setError('')
+  }
 
   return (
-    <main className={styles.main}>
-      {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
+    <main style={styles.main}>
+      <div style={styles.container}>
 
-      {/* History sidebar */}
-      <div className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ''}`}>
-        <div className={styles.sidebarHeader}>
-          <span className={styles.sidebarTitle}>Recent analyses</span>
-          <button className={styles.sidebarClose} onClick={() => setSidebarOpen(false)}>✕</button>
+        {/* Header */}
+        <div style={styles.header}>
+          <h1 style={styles.logo}>Candor</h1>
+          <p style={styles.tagline}>Are your roadmap assumptions still valid?</p>
         </div>
-        {history.length === 0
-          ? <p className={styles.sidebarEmpty}>No analyses yet.</p>
-          : (
-            <div className={styles.sidebarList}>
-              {history.map((entry, i) => (
-                <button key={i} className={styles.sidebarItem} onClick={() => loadFromHistory(entry)}>
-                  <span className={styles.sidebarItemName}>{entry.name}</span>
-                  <span className={styles.sidebarItemMeta}>{entry.sector ? `${entry.sector} · ` : ''}{entry.category} · {entry.date}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        <p className={styles.sidebarFooter}>Showing up to {MAX_HISTORY} most recent · Cache valid 30 days</p>
-      </div>
 
-      <div className={screen === 'results' ? styles.containerWide : styles.container}>
-
-        {/* Logo */}
-        <div className={styles.logoRow}>
-          <div className={styles.logo}>
-            <div className={styles.logoMark}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <circle cx="9" cy="9" r="3" fill="currentColor" />
-                <path d="M9 2C5.13 2 2 5.13 2 9s3.13 7 7 7 7-3.13 7-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <circle cx="14" cy="4" r="1.5" fill="#e24b4a" />
-              </svg>
+        {/* Input form — hidden once assumption is saved */}
+        {!assumption && (
+          <div style={styles.form}>
+            <div style={styles.field}>
+              <label style={styles.label}>I believe</label>
+              <textarea
+                style={styles.textarea}
+                placeholder="e.g. Quick commerce has not penetrated beyond Tier 1 cities in India"
+                value={belief}
+                onChange={e => setBelief(e.target.value)}
+                rows={3}
+              />
             </div>
-            <span className={styles.logoName}>Parrot</span>
-            <span className={styles.logoTag}>market signal</span>
+
+            <div style={styles.field}>
+              <label style={styles.label}>This matters for</label>
+              <textarea
+                style={styles.textarea}
+                placeholder="e.g. Our decision to focus the first version on metro cities only"
+                value={decisionDriver}
+                onChange={e => setDecisionDriver(e.target.value)}
+                rows={2}
+              />
+            </div>
+
+            <div style={styles.field}>
+              <label style={styles.label}>The market is</label>
+              <input
+                style={styles.input}
+                placeholder="e.g. Quick commerce, India"
+                value={market}
+                onChange={e => setMarket(e.target.value)}
+              />
+            </div>
+
+            <div style={styles.field}>
+              <label style={styles.label}>
+                I&apos;m watching
+                <span style={styles.optional}> — optional, comma separated</span>
+              </label>
+              <input
+                style={styles.input}
+                placeholder="e.g. Zepto, Blinkit, Swiggy Instamart"
+                value={competitors}
+                onChange={e => setCompetitors(e.target.value)}
+              />
+            </div>
+
+            {error && <p style={styles.error}>{error}</p>}
+
+            <button
+              style={loading ? { ...styles.button, opacity: 0.6 } : styles.button}
+              onClick={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? 'Saving...' : 'Save assumption'}
+            </button>
           </div>
-          {history.length > 0 && (
-            <button className={styles.historyBtn} onClick={() => setSidebarOpen(true)}>History ({history.length})</button>
-          )}
-        </div>
+        )}
 
-        {/* INPUT SCREEN */}
-        {screen === 'input' && (
-          <div className={styles.card}>
-            <div className={styles.field}>
-              <label className={styles.label}>Brand name</label>
-              <input className={styles.input} type="text" placeholder="e.g. Swiggy" value={name}
-                onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()} />
-            </div>
-            <div className={styles.field}>
-              <label className={styles.label}>Website</label>
-              <input className={styles.input} type="text" placeholder="swiggy.com" value={url} onChange={e => setUrl(e.target.value)} />
-            </div>
-            <div className={styles.row}>
-              <div className={styles.field}>
-                <label className={styles.label}>Sector</label>
-                <select className={styles.input} value={sector} onChange={e => handleSectorChange(e.target.value)}>
-                  <option value="">Select sector...</option>
-                  {SECTORS.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div className={styles.field}>
-                <label className={styles.label}>Category</label>
-                <select className={styles.input} value={category} onChange={e => setCategory(e.target.value)} disabled={!sector}>
-                  <option value="">{sector ? 'Select category...' : 'Select sector first'}</option>
-                  {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className={styles.field}>
-              <label className={styles.label}>Time range</label>
-              <select className={styles.input} value={timeRange} onChange={e => setTimeRange(e.target.value)}>
-                {TIME_RANGES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
+        {/* Assumption saved — show summary + Check Now */}
+        {assumption && !evaluation && (
+          <div style={styles.savedCard}>
+            <p style={styles.savedLabel}>Assumption saved</p>
+            <p style={styles.savedBelief}>&ldquo;{assumption.belief}&rdquo;</p>
+            <p style={styles.savedMeta}>
+              {assumption.raw_market_input}
+              {assumption.raw_competitors?.length > 0 &&
+                ` · watching ${assumption.raw_competitors.join(', ')}`}
+            </p>
 
-            <div className={styles.categoryHint}>
-              <span className={styles.categoryHintIcon}>↳</span>
-              Sector and category shape what signals Parrot looks for.{' '}
-              <span className={styles.categoryHintHighlight}>Swiggy under Food Delivery</span> surfaces different intelligence than{' '}
-              <span className={styles.categoryHintHighlight}>Swiggy under Hyperlocal</span>.
-            </div>
+            {error && <p style={styles.error}>{error}</p>}
 
-            <button className={styles.contextToggle} onClick={() => setContextOpen(o => !o)}>
-              <span>{contextOpen ? '▾' : '▸'} Add your context</span>
-              <span className={styles.contextToggleHint}>{hasContext ? 'filled' : 'optional — unlocks personalised insight'}</span>
+            <button
+              style={evaluating ? { ...styles.button, opacity: 0.6 } : styles.button}
+              onClick={handleEvaluate}
+              disabled={evaluating}
+            >
+              {evaluating ? 'Checking...' : 'Check now'}
             </button>
 
-            {contextOpen && (
-              <div className={styles.contextFields}>
-                <div className={styles.field}>
-                  <label className={styles.label}>What are you building?</label>
-                  <input className={styles.input} type="text" placeholder="e.g. A hyperlocal grocery app for working parents"
-                    value={idea} onChange={e => setIdea(e.target.value)} />
-                </div>
-                <div className={styles.field}>
-                  <label className={styles.label}>Who is it for?</label>
-                  <input className={styles.input} type="text" placeholder="e.g. Urban professionals aged 25-40"
-                    value={audience} onChange={e => setAudience(e.target.value)} />
-                </div>
-                <div className={styles.field}>
-                  <label className={styles.label}>What is your edge?</label>
-                  <input className={styles.input} type="text" placeholder="e.g. 10-minute delivery with no minimum order"
-                    value={edge} onChange={e => setEdge(e.target.value)} />
-                </div>
-              </div>
-            )}
+            <button style={styles.ghost} onClick={handleReset}>
+              Start over
+            </button>
+          </div>
+        )}
 
-            <div className={styles.tokenBar}>
-              <div className={styles.pips}>
-                {Array.from({ length: DAILY_LIMIT }, (_, i) => (
-                  <div key={i} className={`${styles.pip} ${i < remaining ? styles.pipActive : ''}`} />
-                ))}
-              </div>
-              <p className={styles.tokenLabel}>
-                {remaining === 0 ? 'Daily limit reached — resets at midnight'
-                  : `${remaining} ${remaining === 1 ? 'analysis' : 'analyses'} remaining today`}
+        {/* Verdict output */}
+        {evaluation && (
+          <div style={styles.verdict}>
+
+            {/* Verdict line */}
+            <div style={styles.verdictHeader}>
+              <span
+                style={{
+                  ...styles.verdictBadge,
+                  color: VERDICT_COLOR[evaluation.verdict],
+                  borderColor: VERDICT_COLOR[evaluation.verdict],
+                }}
+              >
+                {evaluation.verdict.toUpperCase()}
+              </span>
+              <p style={styles.verdictLine}>
+                {evaluation.synthesis.verdict_line}
               </p>
             </div>
 
-            <button className={styles.analyzeBtn} onClick={analyze} disabled={remaining === 0}>
-              {hasContext ? 'Analyze brand + get insight' : 'Analyze brand'}
-            </button>
-            {error && <p className={styles.error}>{error}</p>}
-          </div>
-        )}
-
-        {/* LOADING SCREEN */}
-        {screen === 'loading' && (
-          <div className={styles.loadingWrap}>
-            <p className={styles.loadingTitle}>Scanning {analyzedName}...</p>
-            <div className={styles.stepList}>
-              {STEPS.map((step, i) => (
-                <div key={i} className={`${styles.step} ${doneSteps.includes(i) ? styles.stepDone : ''} ${activeStep === i ? styles.stepActive : ''}`}>
-                  <div className={styles.stepDot} />{step}
+            {/* Evidence block */}
+            <div style={styles.section}>
+              <p style={styles.sectionLabel}>Evidence</p>
+              {evaluation.synthesis.evidence.map((e, i) => (
+                <div key={i} style={styles.evidenceCard}>
+                  <div style={styles.evidenceMeta}>
+                    <span style={styles.evidenceSource}>{e.source}</span>
+                    <span style={styles.evidenceDate}>{e.date}</span>
+                  </div>
+                  <p style={styles.evidenceWhat}>{e.what_happened}</p>
+                  <p style={styles.evidenceWhy}>{e.why_it_matters}</p>
                 </div>
               ))}
             </div>
+
+            {/* Component breakdown */}
+            <div style={styles.section}>
+              <p style={styles.sectionLabel}>Assumption components</p>
+              {evaluation.synthesis.component_breakdown.map((c, i) => (
+                <div key={i} style={styles.componentRow}>
+                  <span
+                    style={{
+                      ...styles.componentSymbol,
+                      color: VERDICT_COLOR[c.status],
+                    }}
+                  >
+                    {COMPONENT_SYMBOL[c.status]}
+                  </span>
+                  <div>
+                    <p style={styles.componentName}>{c.component}</p>
+                    <p style={styles.componentNote}>{c.note}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Next action */}
+            <div style={styles.nextAction}>
+              <p style={styles.sectionLabel}>Next action</p>
+              <p style={styles.nextActionText}>
+                {evaluation.synthesis.next_action.text}
+              </p>
+            </div>
+
+            <button style={styles.ghost} onClick={handleReset}>
+              Check another assumption
+            </button>
           </div>
         )}
 
-        {/* RESULTS SCREEN */}
-        {screen === 'results' && brief && (
-          <div>
-            {/* Header */}
-            <div className={styles.resultsHeader}>
-              <div>
-                <p className={styles.resultsTitle}>{analyzedName}</p>
-                <div className={styles.resultsMetaRow}>
-                  <p className={styles.resultsMeta}>
-                    {analyzedUrl} · {analyzedAt}{analyzedSector ? ` · ${analyzedSector}` : ''} · {analyzedCategory} · {timeLabel}
-                  </p>
-                  {fromCache && (
-                    <span className={styles.cacheTag}>
-                      Cached · <button className={styles.refreshLink} onClick={refreshAnalysis}>Refresh</button>
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className={styles.resultsActions}>
-                <button className={`${styles.resetBtn} ${copied ? styles.copiedBtn : ''}`} onClick={copyBrief}>
-                  {copied ? 'Copied ✓' : 'Copy brief'}
-                </button>
-                {history.length > 0 && (
-                  <button className={styles.resetBtn} onClick={() => setSidebarOpen(true)}>History</button>
-                )}
-                <button className={styles.resetBtn} onClick={reset}>← New</button>
-              </div>
-            </div>
-
-            {/* Tab bar */}
-            <div className={styles.tabBar}>
-              <button
-                className={`${styles.tab} ${activeTab === 'signal' ? styles.tabActive : ''}`}
-                onClick={() => setActiveTab('signal')}
-              >
-                Market signal
-              </button>
-              <button
-                className={`${styles.tab} ${activeTab === 'compare' ? styles.tabActive : ''}`}
-                onClick={() => setActiveTab('compare')}
-              >
-                Compare brands
-                {comparison && <span className={styles.tabBadge}>✓</span>}
-              </button>
-            </div>
-
-            {/* SIGNAL TAB */}
-            {activeTab === 'signal' && (
-              <div>
-                <div className={styles.panelGrid}>
-                  {/* Left panel */}
-                  <div className={styles.panelLeft}>
-                    <div className={styles.sectionCard}>
-                      <div className={styles.sectionHead}>
-                        <span className={styles.sectionLabel}>Recent activity</span>
-                      </div>
-                      {(brief.activity || []).length === 0
-                        ? <p className={styles.itemBody}>No recent activity found.</p>
-                        : brief.activity.map((item, i) => (
-                          <div key={i} className={styles.item}>
-                            <p className={styles.itemTitle}>{item.title}</p>
-                            <p className={styles.itemBody}>{item.body}</p>
-                            <SourceTag source={item.source} url={item.url} s={styles} />
-                          </div>
-                        ))}
-                    </div>
-
-                    <div className={styles.sectionCard}>
-                      <div className={styles.sectionHead}>
-                        <span className={styles.sectionLabel}>Community signal</span>
-                      </div>
-                      {(brief.community || []).length === 0
-                        ? <p className={styles.itemBody}>No community discussions found.</p>
-                        : brief.community.map((item, i) => (
-                          <div key={i} className={styles.item}>
-                            <p className={styles.itemTitle}>{item.title}</p>
-                            <p className={styles.itemBody}>{item.body}</p>
-                            <SourceTag source={item.source} url={item.url} s={styles} />
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-
-                  {/* Right panel */}
-                  <div className={styles.panelRight}>
-                    <div className={styles.sectionCard}>
-                      <div className={styles.sectionHead}>
-                        <span className={styles.sectionLabel}>Market sentiment</span>
-                        <span className={styles.sectionSubLabel}>Score = satisfaction (100 = users love it)</span>
-                      </div>
-                      {(brief.sentiment || []).length === 0
-                        ? <p className={styles.itemBody}>No review data found.</p>
-                        : brief.sentiment.map((item, i) => (
-                          <div key={i} className={styles.sentimentItem}>
-                            <div className={styles.sentimentTop}>
-                              <div className={styles.sentimentMeta}>
-                                <span className={`${styles.sentimentDot} ${scoreToDotClass(item.score, styles)}`} />
-                                <span className={styles.sentimentLabel}>{item.label}</span>
-                              </div>
-                              <span className={styles.sentimentPct}>{Math.round(item.score)}</span>
-                            </div>
-                            <div className={styles.sentimentBarWrap}>
-                              <div
-                                className={`${styles.sentimentBar} ${scoreToBarClass(item.score, styles)}`}
-                                style={{ width: `${Math.round(item.score)}%` }}
-                              />
-                            </div>
-                            {item.summary && <p className={styles.sentimentSummary}>{item.summary}</p>}
-                          </div>
-                        ))}
-                    </div>
-
-                    {(brief.keywords || []).length > 0 && (
-                      <div className={styles.sectionCard}>
-                        <div className={styles.sectionHead}>
-                          <span className={styles.sectionLabel}>Signal keywords</span>
-                          <span className={styles.sectionSubLabel}>size = frequency · colour = sentiment</span>
-                        </div>
-                        <div className={styles.filterRow}>
-                          {(['all', 'pos', 'neg'] as const).map(f => (
-                            <button key={f}
-                              className={`${styles.filterBtn} ${keywordFilter === f ? styles.filterBtnActive : ''} ${f === 'pos' ? styles.filterBtnPos : f === 'neg' ? styles.filterBtnNeg : ''}`}
-                              onClick={() => setKeywordFilter(f)}>
-                              {f === 'all' ? 'All' : f === 'pos' ? '● Positive' : '● Negative'}
-                            </button>
-                          ))}
-                        </div>
-                        <div className={styles.wordCloud}>
-                          {brief.keywords.map((kw, i) => {
-                            const isActive = keywordFilter === 'all' || kw.direction === keywordFilter
-                            return (
-                              <span key={i} className={styles.keyword} style={{
-                                fontSize: keywordSize(kw.weight),
-                                color: keywordColor(kw.direction),
-                                opacity: isActive ? keywordOpacity(kw.weight) : 0.1,
-                                transition: 'opacity 0.2s ease',
-                              }}>
-                                {kw.word}
-                              </span>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Insight panel */}
-                {brief.insight && (
-                  <div className={styles.insightCard}>
-                    <div className={styles.insightHeader}>
-                      <span className={styles.insightTitle}>What this means for you</span>
-                      <span className={styles.insightModel}>gemini flash lite</span>
-                    </div>
-                    <div className={styles.insightGrid}>
-                      <div className={styles.insightItem}>
-                        <p className={styles.insightItemLabel}>Where they overlap</p>
-                        <p className={styles.insightItemBody}>{brief.insight.overlap}</p>
-                      </div>
-                      <div className={styles.insightItem}>
-                        <p className={styles.insightItemLabel}>Where they are weak</p>
-                        <p className={styles.insightItemBody}>{brief.insight.weakness}</p>
-                      </div>
-                      <div className={styles.insightItem}>
-                        <p className={styles.insightItemLabel}>The gap</p>
-                        <p className={styles.insightItemBody}>{brief.insight.gap}</p>
-                      </div>
-                      <div className={styles.insightItem}>
-                        <p className={styles.insightItemLabel}>What to watch</p>
-                        <p className={styles.insightItemBody}>{brief.insight.watch}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* COMPARE TAB */}
-            {activeTab === 'compare' && (
-              <div className={styles.compareTab}>
-                <p className={styles.compareTabHint}>
-                  Add 1–2 brands from the same sector and category to compare against <strong>{analyzedName}</strong>.
-                  Sector and category locked to <strong>{analyzedSector} · {analyzedCategory}</strong>.
-                </p>
-
-                <div className={styles.compareFields}>
-                  {compareBrands.map((brand, i) => (
-                    <div key={i} className={styles.compareBrandRow}>
-                      <div className={styles.compareBrandInputs}>
-                        <input className={styles.input} type="text" placeholder={`Brand ${i + 2} name`}
-                          value={brand.name} onChange={e => updateCompareBrand(i, 'name', e.target.value)} />
-                        <input className={styles.input} type="text" placeholder="website.com"
-                          value={brand.url} onChange={e => updateCompareBrand(i, 'url', e.target.value)} />
-                      </div>
-                      {compareBrands.length > 1 && (
-                        <button className={styles.removeBtn} onClick={() => setCompareBrands(prev => prev.filter((_, idx) => idx !== i))}>✕</button>
-                      )}
-                    </div>
-                  ))}
-
-                  {compareBrands.length < 2 && (
-                    <button className={styles.addBrandBtn} onClick={() => setCompareBrands(prev => [...prev, { name: '', url: '' }])}>
-                      + Add another brand
-                    </button>
-                  )}
-
-                  <button className={styles.analyzeBtn} onClick={runComparison} disabled={compareLoading}>
-                    {compareLoading ? 'Comparing...' : 'Run comparison'}
-                  </button>
-
-                  {compareError && <p className={styles.error}>{compareError}</p>}
-                </div>
-
-                {comparison && (
-                  <div className={styles.comparisonResults}>
-                    <div className={styles.comparisonGrid}>
-                      <div className={styles.sectionCard}>
-                        <div className={styles.sectionHead}>
-                          <span className={styles.sectionLabel}>Shared strengths</span>
-                          <span className={styles.sectionSubLabel}>what the whole category does well</span>
-                        </div>
-                        {comparison.sharedStrengths.map((item, i) => (
-                          <div key={i} className={styles.item}>
-                            <p className={styles.itemTitle}>{item.theme}</p>
-                            <p className={styles.itemBody}>{item.description}</p>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className={styles.sectionCard}>
-                        <div className={styles.sectionHead}>
-                          <span className={styles.sectionLabel}>Category gap</span>
-                          <span className={styles.sectionSubLabel}>complaints nobody has fixed</span>
-                        </div>
-                        {comparison.sharedWeaknesses.map((item, i) => (
-                          <div key={i} className={styles.item}>
-                            <p className={styles.itemTitle}>{item.theme}</p>
-                            <p className={styles.itemBody}>{item.description}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className={styles.brandCompareGrid}>
-                      {comparison.brands.map((brand, i) => (
-                        <div key={i} className={styles.sectionCard}>
-                          <div className={styles.sectionHead}>
-                            <span className={styles.sectionLabel}>{brand.name}</span>
-                          </div>
-                          <div className={styles.brandCompareItem}>
-                            <p className={styles.brandCompareLabel} style={{ color: '#639922' }}>What sets them apart</p>
-                            <p className={styles.itemBody}>{brand.unique}</p>
-                          </div>
-                          <div className={styles.brandCompareItem}>
-                            <p className={styles.brandCompareLabel} style={{ color: '#639922' }}>Users love</p>
-                            <p className={styles.itemBody}>{brand.topPositive}</p>
-                          </div>
-                          <div className={styles.brandCompareItem}>
-                            <p className={styles.brandCompareLabel} style={{ color: '#e24b4a' }}>Users complain about</p>
-                            <p className={styles.itemBody}>{brand.topNegative}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Footer */}
-            <div className={styles.footer}>
-              <p className={styles.footerText}>Sentiment and signals reflect publicly available user opinions and community discussions — not the views of Parrot or its creators.</p>
-              <p className={styles.footerText}>This analysis is generated by AI and may contain inaccuracies. Verify critical information independently before making decisions.</p>
-            </div>
-          </div>
-        )}
       </div>
     </main>
   )
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  main: {
+    minHeight: '100vh',
+    backgroundColor: '#0a0a0a',
+    color: '#e5e5e5',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    padding: '48px 16px',
+  },
+  container: {
+    maxWidth: '600px',
+    margin: '0 auto',
+  },
+  header: {
+    marginBottom: '40px',
+  },
+  logo: {
+    fontSize: '24px',
+    fontWeight: '700',
+    color: '#ffffff',
+    margin: '0 0 8px 0',
+    letterSpacing: '-0.5px',
+  },
+  tagline: {
+    fontSize: '14px',
+    color: '#6b7280',
+    margin: 0,
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '24px',
+  },
+  field: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  label: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  optional: {
+    fontWeight: '400',
+    textTransform: 'none',
+    letterSpacing: '0',
+    color: '#4b5563',
+  },
+  textarea: {
+    backgroundColor: '#111111',
+    border: '1px solid #222222',
+    borderRadius: '6px',
+    color: '#e5e5e5',
+    fontSize: '15px',
+    lineHeight: '1.5',
+    padding: '12px',
+    resize: 'vertical',
+    outline: 'none',
+    fontFamily: 'inherit',
+  },
+  input: {
+    backgroundColor: '#111111',
+    border: '1px solid #222222',
+    borderRadius: '6px',
+    color: '#e5e5e5',
+    fontSize: '15px',
+    padding: '12px',
+    outline: 'none',
+    fontFamily: 'inherit',
+    width: '100%',
+    boxSizing: 'border-box',
+  },
+  button: {
+    backgroundColor: '#ffffff',
+    color: '#0a0a0a',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '600',
+    padding: '12px 24px',
+    cursor: 'pointer',
+    alignSelf: 'flex-start',
+  },
+  ghost: {
+    backgroundColor: 'transparent',
+    color: '#4b5563',
+    border: 'none',
+    fontSize: '13px',
+    cursor: 'pointer',
+    padding: '8px 0',
+    textDecoration: 'underline',
+    display: 'block',
+    marginTop: '8px',
+  },
+  error: {
+    color: '#ef4444',
+    fontSize: '13px',
+    margin: 0,
+  },
+  savedCard: {
+    backgroundColor: '#111111',
+    border: '1px solid #222222',
+    borderRadius: '8px',
+    padding: '24px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  savedLabel: {
+    fontSize: '11px',
+    fontWeight: '600',
+    color: '#4b5563',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    margin: 0,
+  },
+  savedBelief: {
+    fontSize: '16px',
+    color: '#ffffff',
+    margin: 0,
+    lineHeight: '1.5',
+  },
+  savedMeta: {
+    fontSize: '13px',
+    color: '#6b7280',
+    margin: 0,
+  },
+  verdict: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '32px',
+  },
+  verdictHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  verdictBadge: {
+    fontSize: '13px',
+    fontWeight: '700',
+    letterSpacing: '0.1em',
+    border: '1px solid',
+    borderRadius: '4px',
+    padding: '3px 8px',
+    alignSelf: 'flex-start',
+  },
+  verdictLine: {
+    fontSize: '18px',
+    color: '#ffffff',
+    margin: 0,
+    lineHeight: '1.5',
+    fontWeight: '500',
+  },
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  sectionLabel: {
+    fontSize: '11px',
+    fontWeight: '600',
+    color: '#4b5563',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    margin: 0,
+  },
+  evidenceCard: {
+    backgroundColor: '#111111',
+    border: '1px solid #1f1f1f',
+    borderRadius: '6px',
+    padding: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  evidenceMeta: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  evidenceSource: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#9ca3af',
+  },
+  evidenceDate: {
+    fontSize: '12px',
+    color: '#4b5563',
+  },
+  evidenceWhat: {
+    fontSize: '14px',
+    color: '#e5e5e5',
+    margin: 0,
+    lineHeight: '1.5',
+  },
+  evidenceWhy: {
+    fontSize: '13px',
+    color: '#6b7280',
+    margin: 0,
+    lineHeight: '1.5',
+    borderLeft: '2px solid #222222',
+    paddingLeft: '10px',
+  },
+  componentRow: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'flex-start',
+  },
+  componentSymbol: {
+    fontSize: '16px',
+    fontWeight: '700',
+    lineHeight: '1.4',
+    flexShrink: 0,
+  },
+  componentName: {
+    fontSize: '14px',
+    color: '#e5e5e5',
+    margin: '0 0 2px 0',
+  },
+  componentNote: {
+    fontSize: '13px',
+    color: '#6b7280',
+    margin: 0,
+  },
+  nextAction: {
+    backgroundColor: '#111111',
+    border: '1px solid #222222',
+    borderRadius: '6px',
+    padding: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  nextActionText: {
+    fontSize: '14px',
+    color: '#e5e5e5',
+    margin: 0,
+    lineHeight: '1.6',
+  },
 }
