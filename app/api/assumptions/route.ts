@@ -13,15 +13,20 @@ async function extractClaimComponents(belief: string, marketInput: string): Prom
 Belief: "${belief}"
 Market context: ${marketInput}
 
-Break this belief into 3-5 distinct, testable components. Each component should be a specific claim that could independently be proven right or wrong — not a restatement of the whole belief.
+Break this belief into 3-5 distinct, testable components. Each component should be a specific claim that could independently be proven right or wrong - not a restatement of the whole belief in different words.
+
+CRITICAL: Each component must test a DIFFERENT mechanism or dimension of the belief, not the same underlying claim rephrased. Before finalizing, check: if evidence broke component 1, would components 2-5 automatically also break? If yes, you have not actually decomposed the belief - you have restated it. Merge near-duplicate components into one.
+
+Good decomposition covers different dimensions like: WHO is affected vs WHY it's happening vs HOW SEVERE it is vs WHETHER it's recent/growing vs WHETHER it's specific to this market.
 
 Example:
-Belief: "B2B SaaS buyers in India are shifting to annual contracts over monthly"
+Belief: "Gig workers in India are overworked due to platform incentive structures"
 Components:
 [
-  { "component": "Buyer preference is shifting toward longer commitment", "description": "Annual contracts are being chosen over monthly at increasing rates" },
-  { "component": "This shift is happening now, not historically", "description": "The change is recent, not a long-standing pattern" },
-  { "component": "This applies to the Indian market specifically", "description": "Not a global SaaS trend being misattributed to India" }
+  { "component": "Platform incentive design is the actual cause, not worker choice", "description": "Overwork is structurally induced by bonus/incentive mechanics, not voluntary" },
+  { "component": "This is a recent or worsening trend, not a stable baseline", "description": "Hours have increased over time rather than being a constant feature of the work" },
+  { "component": "This is specific to certain platforms, not gig work universally", "description": "Some platforms induce this more than others - it is not category-wide" },
+  { "component": "Workers themselves identify this as a problem, not just external observers", "description": "Worker sentiment reflects dissatisfaction, not just objective hours data" }
 ]
 
 Return JSON only, no preamble, no markdown fences:
