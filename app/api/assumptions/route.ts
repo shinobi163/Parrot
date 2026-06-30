@@ -42,7 +42,18 @@ async function generateLeadingIndicators(belief: string, marketInput: string): P
 Belief: "${belief}"
 Market: ${marketInput}
 
-Be specific to this belief and market. No generic answers like "monitor competitors" or "watch the news."
+CRITICAL: Every indicator must be grounded in mechanisms and institutions that actually exist in this specific market and geography. Do not default to US-centric patterns (class-action lawsuits, Glassdoor reviews, union drives) unless the stated market is the US. If the market is India, consider what's actually relevant there - platform-specific driver forums, local labor ministry actions, state-level gig worker welfare schemes, platform app store reviews, vernacular news coverage, or social media discourse on platforms actually used in that market.
+
+A leading indicator must satisfy ALL of these:
+1. It would appear BEFORE the assumption visibly breaks, not after - avoid lawsuits, public sentiment surveys, or anything that requires the problem to already be severe and organized
+2. It must be checkable through normal public web search or news monitoring - not investor calls, not data platforms don't publish, not internal company metrics
+3. It should be a specific, observable action by a specific type of entity - a hiring pattern, a pricing change, a feature launch, a regulatory filing, a job posting trend
+4. It must reflect institutions, behaviors, and information sources that genuinely exist in the stated market - if you are unsure whether something exists in this market, do not include it
+
+Bad example (lagging, wrong market): "Rise in class-action lawsuits citing overwork" - assumes US legal system
+Good example (leading, market-aware): "A major platform like Zomato or Swiggy announces a driver fatigue or rest-break feature in their partner app" - specific to Indian gig platforms
+
+Be specific to this belief and market. No generic answers.
 
 Return JSON only, no preamble:
 {
