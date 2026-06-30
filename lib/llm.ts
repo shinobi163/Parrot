@@ -34,28 +34,44 @@ async function callGemini(prompt: string, options?: LLMOptions): Promise<LLMResu
     body.tools = [{ google_search: {} }]
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+  const maxAttempts = 2
+  let lastError: Error | null = null
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        const errMsg = data.error?.message || 'Gemini API error'
+        throw new Error(errMsg)
+      }
+
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!text) {
+        throw new Error('No text in Gemini response')
+      }
+
+      return { text }
+
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err))
+      if (attempt < maxAttempts) {
+        // Wait 1.5 seconds before retrying
+        await new Promise(resolve => setTimeout(resolve, 1500))
+      }
     }
-  )
-
-  const data = await response.json()
-
-  if (!response.ok) {
-    const errMsg = data.error?.message || 'Gemini API error'
-    throw new Error(errMsg)
   }
 
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!text) {
-    throw new Error('No text in Gemini response')
-  }
-
-  return { text }
+  throw lastError
 }
 
 // Strips citation tags Gemini sometimes injects when search grounding is used

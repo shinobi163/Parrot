@@ -70,17 +70,16 @@ export async function POST(req: NextRequest) {
     let leadingIndicators: string[] = []
 
     try {
-      const [components, indicators] = await Promise.all([
-        extractClaimComponents(belief, raw_market_input),
-        generateLeadingIndicators(belief, raw_market_input),
-      ])
-      claimComponents = components
-      leadingIndicators = indicators
-    } catch (llmErr) {
-      // If Gemini fails, save the assumption anyway with empty arrays.
-      // Don't block assumption creation on LLM availability.
-      console.error('Claim component extraction failed:', llmErr)
-    }
+  claimComponents = await extractClaimComponents(belief, raw_market_input)
+} catch (llmErr) {
+  console.error('Claim component extraction failed:', llmErr)
+}
+
+try {
+  leadingIndicators = await generateLeadingIndicators(belief, raw_market_input)
+} catch (llmErr) {
+  console.error('Leading indicator generation failed:', llmErr)
+}
 
     const { data, error } = await supabase
       .from('assumptions')
